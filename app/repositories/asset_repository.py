@@ -1,9 +1,9 @@
-# app/repositories/asset_repository.py
 from typing import Iterable, Mapping, Optional, List
-from ..infra.db.bq_client import q, insert, fq, ensure_assets_table, merge_assets_from_stage, truncate
+from ..infra.db.bq_client import q, insert, fq, ensure_assets_tables, merge_assets_from_stage, truncate
 
 class AssetRepository:
     def list(self, brand_name: Optional[str]=None, category: Optional[str]=None, subcategory: Optional[str]=None) -> List[Mapping]:
+        ensure_assets_tables()
         where = []
         params = {}
         if brand_name:
@@ -25,11 +25,8 @@ class AssetRepository:
         return q(sql, params)
 
     def upsert_batch(self, rows: Iterable[Mapping]):
-        """
-        Carrega em 'assets_stage' (LOAD JOB) e faz MERGE em 'assets'.
-        """
-        ensure_assets_table()
-        truncate("assets_stage")  # garante stage limpo
-        insert("assets_stage", rows)  # LOAD JOB -> stage
-        merge_assets_from_stage("assets_stage")  # MERGE -> assets
-        truncate("assets_stage")  # opcional limpar ao final
+        ensure_assets_tables()
+        truncate("assets_stage")
+        insert("assets_stage", rows)          # LOAD JOB
+        merge_assets_from_stage("assets_stage")
+        truncate("assets_stage")
