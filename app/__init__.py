@@ -17,3 +17,9 @@ CORS(
     expose_headers=["Content-Length","Content-Type"],
     methods=["GET", "POST", "OPTIONS"]
 )
+
+import mimetypes
+mimetypes.add_type("font/ttf", ".ttf")
+mimetypes.add_type("font/otf", ".otf")
+mimetypes.add_type("font/woff", ".woff")
+mimetypes.add_type("font/woff2", ".woff2")

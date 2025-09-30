@@ -33,14 +33,18 @@ def list_assets():
 def webfonts_css():
     brand_name = request.args.get("brand_name")
     if not brand_name:
-        return Response("/* brand_name é obrigatório */", mimetype="text/css", status=400)
+        return Response("/* brand_name é obrigatório */", mimetype="text/css", status=200)
 
     try:
         svc = LovableService()
         css = svc.generate_webfonts_css(brand_name=brand_name, prefer_stream=True)
-        return Response(css, mimetype="text/css", status=200)
+        return Response(css, mimetype="text/css", status=200, headers={
+            "Vary": "Origin",
+            "Timing-Allow-Origin": "*",
+        })
     except Exception as e:
-        # fallback seguro (mantém 200 p/ não quebrar carregamento do site)
-        fallback = "/* webfonts indisponível: {} */\n".format(type(e).__name__)
-        fallback += "@font-face{font-family:'BrandFont';src:local('Arial');font-weight:400;font-style:normal;font-display:swap;}\n"
-        return Response(fallback, mimetype="text/css", status=200)
+        fallback = "@font-face{font-family:'BrandFont';src:local('Arial');font-weight:400;font-style:normal;font-display:swap;}\n"
+        return Response("/* fallback */\n"+fallback, mimetype="text/css", status=200, headers={
+            "Vary": "Origin",
+            "Timing-Allow-Origin": "*",
+        })

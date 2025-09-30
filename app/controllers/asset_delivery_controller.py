@@ -4,16 +4,13 @@ from ..infra.bucket.gcs_client import GCSClient
 
 assets_bp = Blueprint("assets_delivery", __name__)
 
+def _auth(): return True
+def _gcs(): return GCSClient()
+
 @assets_bp.options("/files/<path:path>")
 @assets_bp.options("/stream/<path:path>")
 def cors_preflight(path: str):
     return ("", 204)
-
-def _auth():
-    return True
-
-def _gcs():
-    return GCSClient()
 
 @assets_bp.get("/files/<path:path>")
 def signed_redirect(path: str):
@@ -36,14 +33,14 @@ def stream_object(path: str):
                 if not chunk:
                     break
                 yield chunk
-
-    headers = {
-        "Content-Type": ctype,
-        "Cache-Control": "private, max-age=0",
-        "Accept-Ranges": "none",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-    }
-
-    return Response(stream_with_context(gen()), status=200, headers=headers)
+    return Response(
+        stream_with_context(gen()),
+        status=200,
+        headers={
+            "Content-Type": ctype,
+            "Cache-Control": "public, max-age=300",
+            "Vary": "Origin",                             # CORS correto em CDNs
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Timing-Allow-Origin": "*",
+        },
+    )
