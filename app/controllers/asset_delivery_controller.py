@@ -7,8 +7,8 @@ assets_bp = Blueprint("assets_delivery", __name__)
 def _auth(): return True
 def _gcs(): return GCSClient()
 
-@assets_bp.options("/files/<path:path>")
-@assets_bp.options("/stream/<path:path>")
+@assets_bp.route("/files/<path:path>", methods=["OPTIONS"])
+@assets_bp.route("/stream/<path:path>", methods=["OPTIONS"])
 def cors_preflight(path: str):
     return ("", 204)
 

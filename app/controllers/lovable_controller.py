@@ -3,11 +3,11 @@ from ..services.lovable_service import LovableService
 
 lovable_bp = Blueprint("lovable", __name__)
 
-@lovable_bp.options("/assets")
+@lovable_bp.route("/assets", methods=["OPTIONS"])
 def _cors_assets_opts():
     return ("", 204)
 
-@lovable_bp.options("/webfonts.css")
+@lovable_bp.route("/webfonts.css", methods=["OPTIONS"])
 def _cors_fonts_opts():
     return ("", 204)
 
