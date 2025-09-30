@@ -24,6 +24,9 @@ def create_app():
     mimetypes.add_type("font/woff", ".woff")
     mimetypes.add_type("font/woff2", ".woff2")
 
+    from .infra.db.bq_client import ensure_assets_table
+    ensure_assets_table()
+
     from .controllers.ui_controller import ui_bp
     from .controllers.ingestion_controller import ingestion_bp
     from .controllers.lovable_controller import lovable_bp

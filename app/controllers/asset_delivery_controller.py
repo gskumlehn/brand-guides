@@ -3,8 +3,6 @@ from flask import Blueprint, redirect, request, abort, Response, stream_with_con
 from ..infra.bucket.gcs_client import GCSClient
 
 assets_bp = Blueprint("assets_delivery", __name__)
-
-def _auth(): return True
 def _gcs(): return GCSClient()
 
 @assets_bp.route("/files/<path:path>", methods=["OPTIONS"])
@@ -14,15 +12,12 @@ def cors_preflight(path: str):
 
 @assets_bp.get("/files/<path:path>")
 def signed_redirect(path: str):
-    _auth()
     ttl = int(request.args.get("ttl", 3600))
     return redirect(_gcs().signed_get_url(path, ttl), code=302)
 
 @assets_bp.get("/stream/<path:path>")
 def stream_object(path: str):
-    _auth()
-    gcs = _gcs()
-    blob = gcs.bucket.blob(path)
+    blob = _gcs().bucket.blob(path)
     if not blob.exists():
         abort(404)
     ctype = blob.content_type or mimetypes.guess_type(path)[0] or "application/octet-stream"

@@ -9,5 +9,5 @@ def load_config():
         "GCS_BUCKET": os.getenv("GCS_BUCKET", ""),
         "USE_GCS_SIGNED_URLS": os.getenv("USE_GCS_SIGNED_URLS", "false").lower() == "true",
         "GCS_SIGNED_URL_EXPIRY_SECONDS": int(os.getenv("GCS_SIGNED_URL_EXPIRY_SECONDS", "3600")),
-        "SERVICE_ACCOUNT_PATH": os.getenv("SERVICE_ACCOUNT_PATH", "/secrets/service-acocunt.json"),
+        "SERVICE_ACCOUNT_PATH": os.getenv("SERVICE_ACCOUNT_PATH", "/secrets/service-account.json"),
     }

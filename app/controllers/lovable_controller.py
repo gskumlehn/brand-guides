@@ -7,10 +7,6 @@ lovable_bp = Blueprint("lovable", __name__)
 def _cors_assets_opts():
     return ("", 204)
 
-@lovable_bp.route("/webfonts.css", methods=["OPTIONS"])
-def _cors_fonts_opts():
-    return ("", 204)
-
 @lovable_bp.get("/assets")
 def list_assets():
     brand_name = request.args.get("brand_name")
@@ -28,6 +24,10 @@ def list_assets():
             it["file_url"] = f"/files/{path}"
             it["stream_url"] = f"/stream/{path}"
     return jsonify(items)
+
+@lovable_bp.route("/webfonts.css", methods=["OPTIONS"])
+def _cors_fonts_opts():
+    return ("", 204)
 
 @lovable_bp.get("/webfonts.css")
 def webfonts_css():
