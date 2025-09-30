@@ -12,7 +12,8 @@ _ALLOWED_ORIGINS = [
 CORS(
     app,
     origins=_ALLOWED_ORIGINS,
-    supports_credentials=True,
-    allow_headers=["Content-Type", "Authorization"],
+    supports_credentials=False,  # não usamos cookies
+    allow_headers="*",           # reflete os headers pedidos no preflight
+    expose_headers=["Content-Length","Content-Type"],
     methods=["GET", "POST", "OPTIONS"]
 )
