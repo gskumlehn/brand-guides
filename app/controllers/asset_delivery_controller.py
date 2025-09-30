@@ -39,7 +39,7 @@ def stream_object(path: str):
         headers={
             "Content-Type": ctype,
             "Cache-Control": "public, max-age=300",
-            "Vary": "Origin",                             # CORS correto em CDNs
+            "Vary": "Origin",
             "Cross-Origin-Resource-Policy": "cross-origin",
             "Timing-Allow-Origin": "*",
         },
