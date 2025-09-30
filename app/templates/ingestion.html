@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Ingestão de Guias de Marca</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
+</head>
+<body>
+  <main class="container">
+    <h1>Ingestão de Guias de Marca</h1>
+
+    <section class="card">
+      <h2>Baixar template de pastas</h2>
+      <a class="btn" href="/templates/structure.zip" download>Download da estrutura (.zip)</a>
+    </section>
+
+    <section class="card">
+      <h2>Upload do ZIP</h2>
+      <form id="ingestion-form">
+        <div class="grid">
+          <label>Nome da marca<input name="brand_name" placeholder="ex.: BZone" required></label>
+          <label>ZIP<input type="file" name="file" accept=".zip" required></label>
+        </div>
+        <button type="submit">Enviar</button>
+      </form>
+      <pre id="result" class="result"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Estrutura esperada do ZIP</h2>
+<pre class="code">
+/logos/{primary|secondary_vertical|secondary_horizontal|guidelines}/01_*.ext
+/graphics/&lt;variacao&gt;/01_&lt;cor&gt;.ext
+/avatars/&lt;nome_conjunto&gt;/01_&lt;cor_ou_estilo&gt;.ext
+/icons/01_*.ext
+/fonts/01_*.ext
+/colors/01_*.ext
+/applications/01_*.ext
+</pre>
+    </section>
+  </main>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+body{
+background:#0b0c0f;color:#e8e9ea;font:16px/1.5 system-ui;margin:0}
+.container{max-width:1000px;margin:40px auto;padding:0 16px}
+.card{background:#14161a;border:1px solid #1e2227;border-radius:12px;padding:16px;margin:16px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+pre.result,pre.code{background:#0f1114;border:1px solid #242a31;padding:12px;border-radius:8px;overflow:auto}
+.btn,button{display:inline-block;background:#4da3ff;color:#00122a;font-weight:700;padding:10px 14px;border-radius:8px;text-decoration:none;border:0;cursor:pointer}
+.btn:hover,button:hover{filter:brightness(1.1)}
