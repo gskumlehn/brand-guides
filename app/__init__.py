@@ -23,9 +23,6 @@ def create_app():
         }},
     )
 
-    # Garante tabelas/colunas no boot
-    ensure_assets_tables()
-
     # Blueprints
     from .controllers.ui_controller import ui_bp
     from .controllers.lovable_controller import lovable_bp
