@@ -6,6 +6,7 @@ _ALLOWED_ORIGINS = [
     r"https://.*\.run\.app",           # Cloud Run pré-visualizações
     r"http://localhost:\d+",           # dev
     r"http://127\.0\.0\.1:\d+",
+    "*"
 ]
 
 CORS(
