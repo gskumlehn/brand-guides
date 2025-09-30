@@ -4,6 +4,11 @@ from ..infra.bucket.gcs_client import GCSClient
 
 assets_bp = Blueprint("assets_delivery", __name__)
 
+@assets_bp.options("/files/<path:path>")
+@assets_bp.options("/stream/<path:path>")
+def cors_preflight(path: str):
+    return ("", 204)
+
 def _auth():
     return True
 
@@ -31,10 +36,14 @@ def stream_object(path: str):
                 if not chunk:
                     break
                 yield chunk
+
     headers = {
         "Content-Type": ctype,
         "Cache-Control": "private, max-age=0",
         "Accept-Ranges": "none",
-        "Access-Control-Allow-Origin": "*",  # fontes sem CORS no cliente
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
     }
+
     return Response(stream_with_context(gen()), status=200, headers=headers)
