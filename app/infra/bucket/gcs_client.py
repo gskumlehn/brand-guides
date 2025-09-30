@@ -1,45 +1,108 @@
+# app/infra/bucket/gcs_client.py
 import os
-from datetime import timedelta
+from functools import lru_cache
+from typing import Iterable, Optional
+
 from google.cloud import storage
-from ..auth.credentials import load_credentials
 
+# Dependências de credencial/projeto centralizadas
+from ..auth.credentials import load_credentials, resolve_project_id
+
+
+# ---------- Singletons básicos (seguem existindo para retrocompatibilidade) ----------
+@lru_cache(maxsize=1)
+def _creds():
+    return load_credentials()
+
+@lru_cache(maxsize=1)
+def _project():
+    return resolve_project_id(_creds())
+
+@lru_cache(maxsize=1)
+def client() -> storage.Client:
+    return storage.Client(project=_project(), credentials=_creds())
+
+def bucket_name() -> str:
+    name = os.getenv("GCS_BUCKET")
+    if not name:
+        raise RuntimeError("GCS_BUCKET não definido nas variáveis de ambiente.")
+    return name
+
+def bucket() -> storage.Bucket:
+    return client().bucket(bucket_name())
+
+
+# ---------- Classe esperada pelos serviços ----------
 class GCSClient:
-    def __init__(self):
-        self._creds = load_credentials()
-        self._project = os.getenv("GCP_PROJECT")
-        self._bucket_name = os.getenv("GCS_BUCKET", "").strip()
-        self._expiry = int(os.getenv("GCS_SIGNED_URL_EXPIRY_SECONDS", "3600"))
-        self._client = None
-        self._bucket = None
+    """
+    Wrapper simples sobre google-cloud-storage para upload, stream e listagem.
+    Mantém comportamento privado (sem tornar público por padrão).
+    """
+    def __init__(self, project_id: Optional[str] = None, bucket_name_override: Optional[str] = None):
+        self._creds = _creds()
+        self._project = project_id or _project()
+        self._client = client()
+        self._bucket = self._client.bucket(bucket_name_override or bucket_name())
 
-    def _client_ok(self):
-        if self._client is None:
-            self._client = storage.Client(project=self._project, credentials=self._creds)
-        return self._client
-
-    def _bucket_ok(self):
-        if self._bucket is None:
-            c = self._client_ok()
-            b = c.lookup_bucket(self._bucket_name)
-            if not b:
-                raise RuntimeError(f"Bucket '{self._bucket_name}' não encontrado ou sem acesso.")
-            self._bucket = b
-        return self._bucket
-
-    def upload_bytes(self, path: str, data: bytes, content_type: str | None):
-        blob = self._bucket_ok().blob(path)
-        blob.cache_control = "public, max-age=31536000"
+    # -------- Uploads --------
+    def upload_bytes(
+        self,
+        path: str,
+        data: bytes,
+        content_type: Optional[str] = None,
+        cache_control: Optional[str] = "public, max-age=31536000",
+        make_public: bool = False,  # mantenha False para não expor objetos por padrão
+    ) -> None:
+        blob = self._bucket.blob(path)
+        if cache_control:
+            blob.cache_control = cache_control
+        if content_type:
+            blob.content_type = content_type
         blob.upload_from_string(data, content_type=content_type)
-        return f"gs://{self._bucket_name}/{path}"
+        if make_public:
+            blob.make_public()
 
-    def signed_get_url(self, path: str, expires_s: int | None = None) -> str:
-        blob = self._bucket_ok().blob(path)
-        return blob.generate_signed_url(
-            expiration=timedelta(seconds=expires_s or self._expiry),
-            method="GET",
-            version="v4",
-        )
+    def upload_fileobj(
+        self,
+        path: str,
+        fileobj,
+        content_type: Optional[str] = None,
+        cache_control: Optional[str] = "public, max-age=31536000",
+        make_public: bool = False,
+    ) -> None:
+        blob = self._bucket.blob(path)
+        if cache_control:
+            blob.cache_control = cache_control
+        if content_type:
+            blob.content_type = content_type
+        blob.upload_from_file(fileobj, content_type=content_type, rewind=True)
+        if make_public:
+            blob.make_public()
 
-    @property
-    def bucket(self):
-        return self._bucket_ok()
+    # -------- Downloads / Stream --------
+    def download_as_bytes(self, path: str) -> bytes:
+        return self._bucket.blob(path).download_as_bytes()
+
+    def open_stream(self, path: str, chunk_size: int = 256 * 1024) -> Iterable[bytes]:
+        """
+        Gera chunks do arquivo (útil para Response(stream_with_context(...))).
+        """
+        blob = self._bucket.blob(path)
+        # stream via file-like para melhor uso de memória
+        with blob.open("rb", chunk_size=chunk_size) as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    # -------- Utilidades --------
+    def exists(self, path: str) -> bool:
+        return self._bucket.blob(path).exists()
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        """Retorna uma lista de nomes (paths) sob o prefixo."""
+        return [b.name for b in self._client.list_blobs(self._bucket, prefix=prefix)]
+
+    def blob(self, path: str) -> storage.Blob:
+        return self._bucket.blob(path)
