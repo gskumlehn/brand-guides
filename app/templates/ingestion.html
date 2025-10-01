@@ -1,45 +1,159 @@
 <!doctype html>
 <html lang="pt-br">
-<head>
-  <meta charset="utf-8">
-  <title>Ingestão de Guias de Marca</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
-</head>
-<body>
-  <main class="container">
-    <h1>Ingestão de Guias de Marca</h1>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Ingestão – Brand Guides</title>
+    <style>
+      :root { --fg:#111; --bg:#fff; --muted:#777; --border:#ddd; }
+      * { box-sizing:border-box; }
+      body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial; color:var(--fg); background:var(--bg); }
+      header { padding:24px; border-bottom:1px solid var(--border); }
+      main { max-width: 980px; margin: 0 auto; padding: 24px; }
+      h1 { font-size: 28px; margin: 0 0 12px; }
+      p.lead { color:var(--muted); margin:0; }
+      section { border:1px solid var(--border); border-radius:14px; padding:20px; margin:20px 0; }
+      h2 { font-size:20px; margin:0 0 10px; }
+      pre { background:#f7f7f7; border:1px solid var(--border); padding:12px; overflow:auto; border-radius:10px; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
+      .btn { display:inline-block; padding:10px 14px; border:1px solid #000; color:#000; text-decoration:none; border-radius:999px; }
+      .btn:hover { background:#000; color:#fff; }
+      ul { margin:8px 0 0 18px; }
+      .muted { color:var(--muted); }
+      .kbd { border:1px solid var(--border); padding:2px 6px; border-radius:6px; background:#fafafa; font-family:inherit; }
+      .stack > * + * { margin-top:12px; } /* espacamento vertical entre elementos */
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Ingestão de Arquivos do Guia de Marca</h1>
+      <p class="lead">Baixe o modelo, preencha as pastas e o <span class="kbd">colors.json</span>, compacte e envie.</p>
+    </header>
 
-    <section class="card">
-      <h2>Baixar template de pastas</h2>
-      <a class="btn" href="/templates/structure.zip" download>Download da estrutura (.zip)</a>
-    </section>
+    <main>
 
-    <section class="card">
-      <h2>Upload do ZIP</h2>
-      <form id="ingestion-form">
-        <div class="grid">
-          <label>Nome da marca<input name="brand_name" placeholder="ex.: BZone" required></label>
-          <label>ZIP<input type="file" name="file" accept=".zip" required></label>
+      <!-- Modelo de pastas & README -->
+      <section>
+        <div class="stack">
+          <h2>Modelo de pastas & README</h2>
+          <p class="muted">Estrutura completa, instruções por pasta e um <code>colors.json</code> vazio.</p>
+          <a class="btn" href="/ingestion/template.zip">⤓ Baixar .zip modelo</a>
         </div>
-        <button type="submit">Enviar</button>
-      </form>
-      <pre id="result" class="result"></pre>
-    </section>
+      </section>
 
-    <section class="card">
-      <h2>Estrutura esperada do ZIP</h2>
-<pre class="code">
-/logos/{primary|secondary_vertical|secondary_horizontal|guidelines}/01_*.ext
-/graphics/&lt;variacao&gt;/01_&lt;cor&gt;.ext
-/avatars/&lt;nome_conjunto&gt;/01_&lt;cor_ou_estilo&gt;.ext
-/icons/01_*.ext
-/fonts/01_*.ext
-/colors/01_*.ext
-/applications/01_*.ext
-</pre>
-    </section>
-  </main>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-</body>
+      <!-- Estrutura de diretórios (visão geral) -->
+      <section>
+        <div class="stack">
+          <h2>Estrutura de diretórios</h2>
+          <pre><code>/
+├─ logos/
+│  ├─ primary/
+│  ├─ secondary_horizontal/
+│  ├─ secondary_vertical/
+│  └─ guidelines/
+│     ├─ primary/
+│     ├─ secondary_horizontal/
+│     └─ secondary_vertical/
+├─ colors/
+│  ├─ colors.json
+│  └─ {NN}_*.jpg   (obrigatório NN_)
+├─ avatars/
+├─ applications/    (obrigatório NN_)
+├─ graphics/
+├─ icons/           (obrigatório NN_)
+└─ fonts/
+</code></pre>
+        </div>
+      </section>
+
+      <!-- LOGOS -->
+      <section>
+        <div class="stack">
+          <h2>LOGOS (PNG, sem NN_)</h2>
+          <p>Em <code>logos/{primary|secondary_horizontal|secondary_vertical}</code> use os arquivos abaixo. O nome do arquivo define a variação de cor aplicada:</p>
+          <pre><code>{variant}.png
+onde {variant} ∈ {primary, secondary, black, white}</code></pre>
+          <p>Exemplos:</p>
+          <pre><code>primary.png
+secondary.png
+black.png
+white.png</code></pre>
+          <p class="muted">Formato: PNG (24 bits), fundo transparente.</p>
+        </div>
+      </section>
+
+      <!-- GUIDELINES (abaixo de LOGOS) -->
+      <section>
+        <div class="stack">
+          <h2>GUIDELINES (JPG, com NN_)</h2>
+          <p>Dentro de <code>logos/guidelines/{primary|secondary_horizontal|secondary_vertical}</code> use o padrão:</p>
+          <pre><code>{NN}_{logoType}-{corPrincipal}_{corSecundária}.jpg
+onde logoType ∈ {primary, secondary_horizontal, secondary_vertical}
+     cores ∈ {primary, secondary, black, white}</code></pre>
+          <p>Exemplos:</p>
+          <pre><code>01_primary-primary_secondary.jpg
+02_secondary_horizontal-black_white.jpg</code></pre>
+        </div>
+      </section>
+
+      <!-- COLORS -->
+      <section>
+        <div class="stack">
+          <h2>COLORS</h2>
+          <p>Adicione <code>colors.json</code> e imagens .jpg <strong>com NN_</strong>.</p>
+          <a class="btn" href="/ingestion/colors.json">Baixar <code>colors.json</code> vazio</a>
+          <h3 style="margin:16px 0 6px;font-size:16px">Exemplo de <code>colors.json</code> vazio</h3>
+          <pre><code>{{ empty_colors_json }}</code></pre>
+        </div>
+      </section>
+
+      <!-- APPLICATIONS -->
+      <section>
+        <div class="stack">
+          <h2>APPLICATIONS (com NN_)</h2>
+          <p>Arquivos de aplicação devem começar com <code>NN_</code>:</p>
+          <pre><code>01_app-tile.png
+02_mock.jpg</code></pre>
+        </div>
+      </section>
+
+      <!-- ICONS -->
+      <section>
+        <div class="stack">
+          <h2>ICONS (com NN_)</h2>
+          <p>Arquivos de ícone devem começar com <code>NN_</code>:</p>
+          <pre><code>01_download.png
+02_upload.png</code></pre>
+        </div>
+      </section>
+
+      <!-- AVATARS -->
+      <section>
+        <div class="stack">
+          <h2>AVATARS</h2>
+          <p>.png/.jpg (numeração opcional). Lógica por cor será adicionada futuramente.</p>
+        </div>
+      </section>
+
+      <!-- GRAPHICS -->
+      <section>
+        <div class="stack">
+          <h2>GRAPHICS</h2>
+          <p>.png/.jpg (numeração opcional).</p>
+        </div>
+      </section>
+
+      <!-- Dicas finais -->
+      <section>
+        <div class="stack">
+          <h2>Dicas finais</h2>
+          <ul>
+            <li>Não altere nomes no frontend — nós preservamos o nome do arquivo do storage.</li>
+            <li>Antes de enviar, confira extensões e padrões de nomes.</li>
+          </ul>
+        </div>
+      </section>
+
+    </main>
+  </body>
 </html>

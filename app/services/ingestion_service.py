@@ -1,107 +1,263 @@
-import os
-import json
-from typing import List, Dict, Optional
-from ..infra.bucket.gcs_client import GCSClient
-from ..infra.db.bq_client import ensure_all_tables, load_json
-from ..utils.naming import parse_sequence
+# app/services/ingestion_service.py
+from __future__ import annotations
 
+import io
+import posixpath
+from zipfile import ZipFile
+from typing import Iterable, List, Dict, Optional
+
+from ..repositories.asset_repository import AssetRepository
+from ..infra.bucket.gcs_client import GCSClient
+from ..utils.naming import (
+    is_png, is_jpg,
+    parse_sequence,
+    parse_logo_color_variant,
+    parse_logo_guideline,
+    parse_avatar_variant,
+)
 
 class IngestionService:
-    """Serviço de ingestão a partir de um diretório local previamente extraído."""
+    """
+    Lê um ZIP seguindo a estrutura predefinida, envia arquivos para o GCS
+    e registra metadados no BigQuery via AssetRepository.
+    """
+    def __init__(self, repo: AssetRepository, gcs: GCSClient, bucket_name: str):
+        self.repo = repo
+        self.gcs = gcs
+        self.bucket = bucket_name
 
-    def __init__(self, bucket_name: str):
-        self.bucket = GCSClient(bucket_name)
+    def _gcs_url(self, path: str) -> str:
+        # NÃO normalizar nomes (preservar acentos/espacos conforme solicitado)
+        return f"gs://{self.bucket}/{path}"
 
-    def ingest(self, brand_slug: str, local_root: str) -> Dict[str, int]:
+    def ingest_zip(self, brand_name: str, zip_bytes: bytes) -> Dict[str, int]:
         """
-        Foco aqui em 'colors':
-          - aceita imagens .jpg/.jpeg (paleta completa)
-          - aceita um 'colors.json' descrevendo as cores sem 'priority'
-            Estrutura esperada:
-            {
-              "primary":   [ {"name":"...", "hex":"#..."} ],
-              "secondary": [ {"name":"...", "hex":"#..."} ],
-              "others":    [ {"name":"...", "hex":"#..."} ]
-            }
+        Caminha pelas pastas conhecidas e aplica regras por categoria/subcategoria.
         """
-        ensure_all_tables()
+        created = 0
+        skipped = 0
 
-        assets_rows: List[Dict] = []
-        colors_rows: List[Dict] = []
-
-        # ---- COLORS ----
-        colors_dir = os.path.join(local_root, "colors")
-        colors_json: Optional[dict] = None
-
-        if os.path.isdir(colors_dir):
-            for fname in sorted(os.listdir(colors_dir)):
-                fpath = os.path.join(colors_dir, fname)
-                if os.path.isdir(fpath):
+        with ZipFile(io.BytesIO(zip_bytes)) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                rel_path = info.filename  # manter como vem
+                parts = rel_path.split("/")
+                if len(parts) < 2:
+                    skipped += 1
                     continue
 
-                low = fname.lower()
-                name, ext = os.path.splitext(low)
+                top = parts[0].lower()
+                filename = parts[-1]
 
-                if low == "colors.json":
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        colors_json = json.load(f)
-                    continue
+                # ----- LOGOS (png) -----
+                if top == "logos":
+                    if len(parts) >= 2 and parts[1].lower() in {"primary", "secondary_horizontal", "secondary_vertical"}:
+                        subcategory = parts[1].lower()
+                        if not is_png(filename):
+                            skipped += 1; continue
+                        variant = parse_logo_color_variant(filename)
+                        if not variant:
+                            skipped += 1; continue
 
-                # imagem(s) completa(s) da paleta
-                if ext in [".jpg", ".jpeg"]:
-                    gcs_path = f"{brand_slug}/colors/{fname}"
-                    url = self.bucket.upload_file(fpath, gcs_path, public=False)
+                        # upload
+                        dest = posixpath.join(brand_name.lower(), rel_path)
+                        self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type="image/png")
 
-                    assets_rows.append(
-                        {
-                            "brand_name": brand_slug.upper(),
+                        self.repo.insert({
+                            "brand_name": brand_name,
+                            "category": "logos",
+                            "subcategory": subcategory,
+                            "path": dest,
+                            "original_name": filename,
+                            "url": self._gcs_url(dest),
+                            "sequence": None,
+                            "applied_color": variant,  # persistimos a cor aplicada
+                        })
+                        created += 1
+                        continue
+
+                    # logos/guidelines/...
+                    if len(parts) >= 3 and parts[1].lower() == "guidelines":
+                        subfolder = parts[2].lower() if len(parts) >= 3 else None
+                        if subfolder not in {"primary", "secondary_horizontal", "secondary_vertical"}:
+                            skipped += 1; continue
+                        if not is_jpg(filename):
+                            skipped += 1; continue
+                        meta = parse_logo_guideline(filename)
+                        if not meta:
+                            skipped += 1; continue
+
+                        dest = posixpath.join(brand_name.lower(), rel_path)
+                        self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type="image/jpeg")
+
+                        self.repo.insert({
+                            "brand_name": brand_name,
+                            "category": "logos",
+                            "subcategory": f"guidelines/{subfolder}",
+                            "path": dest,
+                            "original_name": filename,
+                            "url": self._gcs_url(dest),
+                            "sequence": meta["sequence"],
+                            "applied_color": f"{meta['main_color']}_{meta['secondary_color']}",  # ex: primary_secondary
+                        })
+                        created += 1
+                        continue
+
+                # ----- COLORS -----
+                if top == "colors":
+                    if filename.lower() == "colors.json":
+                        # envia como json
+                        dest = posixpath.join(brand_name.lower(), rel_path)
+                        self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type="application/json")
+                        self.repo.insert({
+                            "brand_name": brand_name,
                             "category": "colors",
                             "subcategory": None,
-                            "sequence": parse_sequence(fname),
-                            "original_name": fname,
-                            "path": gcs_path,
-                            "url": url,
-                        }
-                    )
+                            "path": dest,
+                            "original_name": filename,
+                            "url": self._gcs_url(dest),
+                            "sequence": None,
+                            "applied_color": None,
+                        })
+                        created += 1
+                        continue
+                    # JPGs com NN_
+                    if not is_jpg(filename):
+                        skipped += 1; continue
+                    seq = parse_sequence(filename)
+                    if seq is None:
+                        skipped += 1; continue
+                    dest = posixpath.join(brand_name.lower(), rel_path)
+                    self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type="image/jpeg")
+                    self.repo.insert({
+                        "brand_name": brand_name,
+                        "category": "colors",
+                        "subcategory": "images",
+                        "path": dest,
+                        "original_name": filename,
+                        "url": self._gcs_url(dest),
+                        "sequence": seq,
+                        "applied_color": None,
+                    })
+                    created += 1
+                    continue
 
-        # persiste assets (imagens da paleta)
-        if assets_rows:
-            load_json("assets", assets_rows)
+                # ----- AVATARS (NOVO) -----
+                if top == "avatars":
+                    if len(parts) < 3:
+                        skipped += 1; continue
+                    subcategory = parts[1].lower()  # round | square | app
+                    if subcategory not in {"round", "square", "app"}:
+                        skipped += 1; continue
+                    if not is_png(filename):
+                        skipped += 1; continue
+                    variant = parse_avatar_variant(filename)  # primary | secondary
+                    if not variant:
+                        skipped += 1; continue
 
-        # persiste paleta do colors.json (SEM priority/source_*)
-        if colors_json:
-            colors_rows.extend(self._flatten_colors_json(brand_slug, colors_json))
-            if colors_rows:
-                load_json("colors", colors_rows)
+                    dest = posixpath.join(brand_name.lower(), rel_path)
+                    self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type="image/png")
+                    self.repo.insert({
+                        "brand_name": brand_name,
+                        "category": "avatars",
+                        "subcategory": subcategory,  # round | square | app
+                        "path": dest,
+                        "original_name": filename,
+                        "url": self._gcs_url(dest),
+                        "sequence": None,            # não há NN_ em avatars
+                        "applied_color": variant,    # primary ou secondary
+                    })
+                    created += 1
+                    continue
 
-        return {
-            "assets_inserted": len(assets_rows),
-            "colors_inserted": len(colors_rows),
-        }
+                # ----- APPLICATIONS (NN_) -----
+                if top == "applications":
+                    seq = parse_sequence(filename)
+                    if seq is None:
+                        skipped += 1; continue
+                    # aceitar png/jpg
+                    ctype = "image/png" if is_png(filename) else "image/jpeg" if is_jpg(filename) else None
+                    if not ctype:
+                        skipped += 1; continue
 
-    # --------------------------
+                    dest = posixpath.join(brand_name.lower(), rel_path)
+                    self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type=ctype)
+                    self.repo.insert({
+                        "brand_name": brand_name,
+                        "category": "applications",
+                        "subcategory": None,
+                        "path": dest,
+                        "original_name": filename,
+                        "url": self._gcs_url(dest),
+                        "sequence": seq,
+                        "applied_color": None,
+                    })
+                    created += 1
+                    continue
 
-    @staticmethod
-    def _flatten_colors_json(brand_slug: str, payload: dict) -> List[Dict]:
-        """
-        Mapeia primary/secondary/others -> linhas na tabela 'colors'
-        Sem 'priority', sem 'source_path', sem 'source_file'.
-        """
-        out: List[Dict] = []
+                # ----- ICONS (NN_) -----
+                if top == "icons":
+                    seq = parse_sequence(filename)
+                    if seq is None:
+                        skipped += 1; continue
+                    ctype = "image/png" if is_png(filename) else "image/jpeg" if is_jpg(filename) else None
+                    if not ctype:
+                        skipped += 1; continue
 
-        def add_role(role_key: str) -> None:
-            items = payload.get(role_key) or []
-            for c in items:
-                out.append(
-                    {
-                        "brand_name": brand_slug.upper(),
-                        "color_name": c.get("name"),
-                        "hex": c.get("hex"),
-                        "role": role_key,
-                    }
-                )
+                    dest = posixpath.join(brand_name.lower(), rel_path)
+                    self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type=ctype)
+                    self.repo.insert({
+                        "brand_name": brand_name,
+                        "category": "icons",
+                        "subcategory": None,
+                        "path": dest,
+                        "original_name": filename,
+                        "url": self._gcs_url(dest),
+                        "sequence": seq,
+                        "applied_color": None,
+                    })
+                    created += 1
+                    continue
 
-        for role in ("primary", "secondary", "others"):
-            add_role(role)
+                # ----- GRAPHICS (livre) -----
+                if top == "graphics":
+                    ctype = "image/png" if is_png(filename) else "image/jpeg" if is_jpg(filename) else None
+                    if not ctype:
+                        skipped += 1; continue
 
-        return out
+                    dest = posixpath.join(brand_name.lower(), rel_path)
+                    self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type=ctype)
+                    self.repo.insert({
+                        "brand_name": brand_name,
+                        "category": "graphics",
+                        "subcategory": None,
+                        "path": dest,
+                        "original_name": filename,
+                        "url": self._gcs_url(dest),
+                        "sequence": None,
+                        "applied_color": None,
+                    })
+                    created += 1
+                    continue
+
+                # ----- FONTS -----
+                if top == "fonts":
+                    dest = posixpath.join(brand_name.lower(), rel_path)
+                    self.gcs.upload_bytes(self.bucket, dest, z.read(info), content_type="application/octet-stream")
+                    self.repo.insert({
+                        "brand_name": brand_name,
+                        "category": "fonts",
+                        "subcategory": None,
+                        "path": dest,
+                        "original_name": filename,
+                        "url": self._gcs_url(dest),
+                        "sequence": None,
+                        "applied_color": None,
+                    })
+                    created += 1
+                    continue
+
+                skipped += 1
+
+        return {"created": created, "skipped": skipped}
