@@ -1,77 +1,107 @@
 import os
-from typing import Dict, Iterable, Optional
-from ..repositories.asset_repository import AssetRepository
-from ..utils.naming import guess_mime_type, file_ext, try_sequence_from_name, parse_logo_meta
+import json
+from typing import List, Dict, Optional
+from ..infra.bucket.gcs_client import GCSClient
+from ..infra.db.bq_client import ensure_all_tables, load_json
+from ..utils.naming import parse_sequence
+
 
 class IngestionService:
-    def __init__(self, bucket_name: str, base_gs_url: str = "gs://brand-guides"):
-        self.bucket_name = bucket_name
-        # Ex.: gs://brand-guides/ccba2/...
-        self.base_gs_url = base_gs_url.rstrip("/")
-        self.repo = AssetRepository()
+    """Serviço de ingestão a partir de um diretório local previamente extraído."""
 
-    def _build_record(
-        self,
-        brand_name: str,
-        path: str,
-    ) -> Dict:
+    def __init__(self, bucket_name: str):
+        self.bucket = GCSClient(bucket_name)
+
+    def ingest(self, brand_slug: str, local_root: str) -> Dict[str, int]:
         """
-        Monta o registro a partir do caminho no bucket (path relativo dentro do bucket),
-        aplicando as novas regras de logos/guidelines.
+        Foco aqui em 'colors':
+          - aceita imagens .jpg/.jpeg (paleta completa)
+          - aceita um 'colors.json' descrevendo as cores sem 'priority'
+            Estrutura esperada:
+            {
+              "primary":   [ {"name":"...", "hex":"#..."} ],
+              "secondary": [ {"name":"...", "hex":"#..."} ],
+              "others":    [ {"name":"...", "hex":"#..."} ]
+            }
         """
-        original_name = os.path.basename(path)
-        mime = guess_mime_type(path)
-        ext = file_ext(path)
-        seq = try_sequence_from_name(original_name)
+        ensure_all_tables()
 
-        # Inferir category/subcategory a partir do path
-        # Esperado path: {brand}/{category}/{subcategory?}/{file}
-        parts = path.split("/")
-        category = parts[1] if len(parts) > 2 else None
-        subcategory = parts[2] if len(parts) > 3 else None
+        assets_rows: List[Dict] = []
+        colors_rows: List[Dict] = []
 
-        # Metadados de logo/guideline
-        logo_meta = parse_logo_meta(path)
+        # ---- COLORS ----
+        colors_dir = os.path.join(local_root, "colors")
+        colors_json: Optional[dict] = None
 
-        rec = {
-            "brand_name": brand_name,
-            "category": category,
-            "subcategory": subcategory,
-            "original_name": original_name,
-            "path": path,  # manter EXATAMENTE como veio
-            "sequence": seq,
-            "url": f"{self.base_gs_url}/{path}",
-            "mime_type": mime,
-            "file_ext": ext,
-            "logo_variant": logo_meta.get("logo_variant"),
-            "logo_color": logo_meta.get("logo_color"),
-            "color_primary": logo_meta.get("color_primary"),
-            "color_secondary": logo_meta.get("color_secondary"),
+        if os.path.isdir(colors_dir):
+            for fname in sorted(os.listdir(colors_dir)):
+                fpath = os.path.join(colors_dir, fname)
+                if os.path.isdir(fpath):
+                    continue
+
+                low = fname.lower()
+                name, ext = os.path.splitext(low)
+
+                if low == "colors.json":
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        colors_json = json.load(f)
+                    continue
+
+                # imagem(s) completa(s) da paleta
+                if ext in [".jpg", ".jpeg"]:
+                    gcs_path = f"{brand_slug}/colors/{fname}"
+                    url = self.bucket.upload_file(fpath, gcs_path, public=False)
+
+                    assets_rows.append(
+                        {
+                            "brand_name": brand_slug.upper(),
+                            "category": "colors",
+                            "subcategory": None,
+                            "sequence": parse_sequence(fname),
+                            "original_name": fname,
+                            "path": gcs_path,
+                            "url": url,
+                        }
+                    )
+
+        # persiste assets (imagens da paleta)
+        if assets_rows:
+            load_json("assets", assets_rows)
+
+        # persiste paleta do colors.json (SEM priority/source_*)
+        if colors_json:
+            colors_rows.extend(self._flatten_colors_json(brand_slug, colors_json))
+            if colors_rows:
+                load_json("colors", colors_rows)
+
+        return {
+            "assets_inserted": len(assets_rows),
+            "colors_inserted": len(colors_rows),
         }
-        return rec
 
-    def ingest_paths(self, brand_name: str, object_paths: Iterable[str]) -> int:
-        """
-        Recebe uma lista de paths do bucket (ex.: 'ccba2/logos/primary/arquivo.png')
-        e insere no BigQuery com as novas colunas.
-        """
-        count = 0
-        for p in object_paths:
-            # Ignore arquivos "ocultos" (ex.: .DS_Store) e pastas
-            base = os.path.basename(p)
-            if not base or base.startswith("."):
-                continue
-            # Cria registro e insere
-            record = self._build_record(brand_name, p)
-            self.repo.insert(record)
-            count += 1
-        return count
+    # --------------------------
 
-    # Caso você já tenha um coletor do GCS, mantenha e apenas alimente ingest_paths(...)
-    # Exemplo (opcional):
-    # def ingest_from_gcs_prefix(self, brand_name: str, prefix: str, gcs_client) -> int:
-    #     paths = []
-    #     for blob in gcs_client.list(prefix):
-    #         if not blob.name.endswith("/"):
-    #             paths.append(blob.name)
-    #     return self.ingest_paths(brand_name, paths)
+    @staticmethod
+    def _flatten_colors_json(brand_slug: str, payload: dict) -> List[Dict]:
+        """
+        Mapeia primary/secondary/others -> linhas na tabela 'colors'
+        Sem 'priority', sem 'source_path', sem 'source_file'.
+        """
+        out: List[Dict] = []
+
+        def add_role(role_key: str) -> None:
+            items = payload.get(role_key) or []
+            for c in items:
+                out.append(
+                    {
+                        "brand_name": brand_slug.upper(),
+                        "color_name": c.get("name"),
+                        "hex": c.get("hex"),
+                        "role": role_key,
+                    }
+                )
+
+        for role in ("primary", "secondary", "others"):
+            add_role(role)
+
+        return out

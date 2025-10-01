@@ -125,3 +125,17 @@ def parse_logo_meta(path: str) -> Dict[str, Optional[str]]:
 
     # Outros arquivos / categorias: sem metadados de logo
     return meta
+
+_SEQ_RE = re.compile(r"^(\d{2})[_-]")
+
+def parse_sequence(filename: str) -> Optional[int]:
+    """
+    Extrai o prefixo de sequência NN_ (ex.: 01_, 02-) se existir.
+    """
+    m = _SEQ_RE.match(filename)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None

@@ -14,3 +14,11 @@ def list_assets():
     items = svc.get_assets(brand_name=brand_name, category=category, subcategory=subcategory)
 
     return jsonify(items)
+
+@lovable_bp.get("/colors")
+def list_colors():
+    brand_name = request.args.get("brand_name")
+    if not brand_name:
+        return jsonify({"error": "brand_name is required"}), 400
+    svc = LovableService()
+    return jsonify(svc.get_colors(brand_name))

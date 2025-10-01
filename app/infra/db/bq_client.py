@@ -1,99 +1,97 @@
 import os
 from typing import Any, Dict, List, Optional
-
 from google.cloud import bigquery
-from google.cloud.bigquery import QueryJobConfig, ScalarQueryParameter
+
 from ..auth.credentials import load_credentials, resolve_project_id
 
 _DATASET = os.getenv("BQ_DATASET", "brand_guides")
-_TABLE = "assets"
-
-_client: Optional[bigquery.Client] = None
+_bq_client: Optional[bigquery.Client] = None
 
 
 def client() -> bigquery.Client:
-    global _client
-    if _client is None:
+    global _bq_client
+    if _bq_client is None:
         creds = load_credentials()
-        project = resolve_project_id()
-        _client = bigquery.Client(credentials=creds, project=project)
-    return _client
+        _bq_client = bigquery.Client(
+            project=resolve_project_id(creds),
+            credentials=creds
+        )
+    return _bq_client
 
 
 def fq(table: str) -> str:
-    """Fully-qualified table."""
-    c = client()
-    return f"`{c.project}.{_DATASET}.{table}`"
+    return f"`{client().project}.{_DATASET}.{table}`"
 
 
-def ensure_assets_tables() -> None:
+def ensure_assets_table() -> None:
+    ddl = f"""
+    CREATE SCHEMA IF NOT EXISTS `{client().project}.{_DATASET}`;
+
+    CREATE TABLE IF NOT EXISTS {fq('assets')} (
+      brand_name    STRING,
+      category      STRING,
+      subcategory   STRING,
+      sequence      INT64,
+      original_name STRING,
+      path          STRING,
+      url           STRING,
+      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+    );
     """
-    Garante que o dataset e a tabela existam e que as colunas novas estejam presentes.
+    client().query(ddl).result()
+
+
+def ensure_colors_table() -> None:
+    # SEM priority, SEM source_path, SEM source_file
+    ddl = f"""
+    CREATE SCHEMA IF NOT EXISTS `{client().project}.{_DATASET}`;
+
+    CREATE TABLE IF NOT EXISTS {fq('colors')} (
+      brand_name  STRING,
+      color_name  STRING,
+      hex         STRING,
+      role        STRING,     -- primary | secondary | others
+      created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+    );
     """
-    c = client()
-    # 1) Dataset
-    c.query(f"CREATE SCHEMA IF NOT EXISTS `{c.project}.{_DATASET}`").result()
-
-    # 2) Tabela base (caso ainda não exista)
-    c.query(
-        f"""
-        CREATE TABLE IF NOT EXISTS {fq(_TABLE)} (
-          brand_name   STRING NOT NULL,
-          category     STRING NOT NULL,
-          subcategory  STRING,
-          original_name STRING NOT NULL,
-          path         STRING NOT NULL,
-          sequence     INT64,
-          url          STRING,
-          mime_type    STRING,
-          file_ext     STRING,
-          -- Novos metadados de logos/guidelines
-          logo_variant STRING,          -- 'primary' | 'secondary_horizontal' | 'secondary_vertical'
-          logo_color   STRING,          -- PNG: 'primary' | 'secondary' | 'black' | 'white'
-          color_primary STRING,         -- JPG guideline: 'primary' | 'secondary' | 'black' | 'white'
-          color_secondary STRING,       -- JPG guideline: idem
-          created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
-        )
-        """
-    ).result()
-
-    # 3) ADD COLUMN IF NOT EXISTS (idempotente para ambientes que já tinham a tabela)
-    alters = [
-        ("mime_type", "STRING"),
-        ("file_ext", "STRING"),
-        ("logo_variant", "STRING"),
-        ("logo_color", "STRING"),
-        ("color_primary", "STRING"),
-        ("color_secondary", "STRING"),
-        ("created_at", "TIMESTAMP"),
-    ]
-    for col, typ in alters:
-        c.query(f"ALTER TABLE {fq(_TABLE)} ADD COLUMN IF NOT EXISTS {col} {typ}").result()
+    client().query(ddl).result()
 
 
-def _bq_param(name: str, value: Any) -> ScalarQueryParameter:
-    # Inferência simples de tipo
-    if isinstance(value, bool):
-        return ScalarQueryParameter(name, "BOOL", value)
-    if isinstance(value, int):
-        return ScalarQueryParameter(name, "INT64", value)
-    if isinstance(value, float):
-        return ScalarQueryParameter(name, "FLOAT64", value)
-    # None ou string/qualquer outro => STRING
-    return ScalarQueryParameter(name, "STRING", value)
+def ensure_all_tables() -> None:
+    ensure_assets_table()
+    ensure_colors_table()
 
 
 def q(sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """
-    Executa uma query como job (sem streaming). Retorna linhas como dict.
-    """
     job_config = None
     if params:
-        job_config = QueryJobConfig(
-            query_parameters=[_bq_param(k, v) for k, v in params.items()]
-        )
+        qp = []
+        for k, v in params.items():
+            if isinstance(v, int):
+                qp.append(bigquery.ScalarQueryParameter(k, "INT64", v))
+            else:
+                qp.append(bigquery.ScalarQueryParameter(k, "STRING", v))
+        job_config = bigquery.QueryJobConfig(query_parameters=qp)
+
     rows = client().query(sql, job_config=job_config).result()
-    out = []
-    for r in rows:
-        out.append(dict(r.items()))
-    return out
+    return [dict(r) for r in rows]
+
+
+def load_json(table: str, rows: List[Dict[str, Any]]) -> None:
+    """Append via LOAD JOB (evita streaming buffer)."""
+    if not rows:
+        return
+    job = client().load_table_from_json(
+        rows,
+        f"{client().project}.{_DATASET}.{table}",
+        job_config=bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            ignore_unknown_values=True
+        ),
+    )
+    job.result()
+
+
+# Alias mantido p/ compatibilidade
+def ensure_assets_tables() -> None:
+    ensure_all_tables()

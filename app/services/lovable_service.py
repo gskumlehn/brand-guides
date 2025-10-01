@@ -1,5 +1,6 @@
 from typing import Dict, List
 from ..repositories.asset_repository import AssetRepository
+from ..infra.db.bq_client import q, fq
 from ..utils.font_meta import (
     family_from_filename,
     weight_from_filename,
@@ -66,3 +67,21 @@ class LovableService:
             )
 
         return "\n\n".join(lines) + ("\n" if lines else "/* sem fontes */\n")
+
+    def get_colors(self, brand_name: str):
+        sql = f"""
+        SELECT
+          color_name AS name,
+          hex,
+          role
+        FROM {fq('colors')}
+        WHERE brand_name = @brand
+        ORDER BY
+          CASE role
+            WHEN 'primary' THEN 0
+            WHEN 'secondary' THEN 1
+            ELSE 2
+          END,
+          name
+        """
+        return q(sql, {"brand": brand_name.upper()})
