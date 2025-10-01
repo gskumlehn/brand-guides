@@ -13,8 +13,7 @@ from flask import (
 
 from ..utils.zip_utils import build_template_zip_bytes, empty_colors_json
 
-# Se o serviço existir, faremos import opcional.
-# Isso evita quebrar o boot caso ainda esteja ajustando o service.
+# Import opcional do serviço para não quebrar o boot se ainda estiver em ajuste
 try:
     from ..services.ingestion_service import IngestionService  # type: ignore
 except Exception:  # pragma: no cover
@@ -44,14 +43,12 @@ def get_empty_colors_json():
     return Response(empty_colors_json(), mimetype="application/json; charset=utf-8")
 
 # ---------------------------------------------------------
-# POST /ingest/upload       -> recebe brand_name + zip_file
-# body: multipart/form-data
+# POST /ingest/upload       -> recebe brand_name + zip_file (multipart)
 #   - brand_name: str (obrigatório)
 #   - zip_file:   file .zip (obrigatório)
 # ---------------------------------------------------------
 @ingestion_bp.post("/upload")
 def upload_zip():
-    # Validações básicas
     brand_name = (request.form.get("brand_name") or "").strip()
     if not brand_name:
         return jsonify({"ok": False, "error": "brand_name é obrigatório."}), 400
@@ -63,7 +60,6 @@ def upload_zip():
     if not f or f.filename == "":
         return jsonify({"ok": False, "error": "Arquivo .zip inválido."}), 400
 
-    # Lê bytes do ZIP
     try:
         zip_bytes = f.read()
         if not zip_bytes:
@@ -71,9 +67,7 @@ def upload_zip():
     except Exception as e:  # pragma: no cover
         return jsonify({"ok": False, "error": f"Falha ao ler ZIP: {e}"}), 400
 
-    # Encaminha para o serviço de ingestão (se disponível)
     if IngestionService is None:
-        # Serviço indisponível — retorna 501 para você ver rapidamente
         return jsonify({
             "ok": False,
             "error": "IngestionService não encontrado. Verifique app/services/ingestion_service.py",
@@ -81,46 +75,107 @@ def upload_zip():
 
     svc = IngestionService()
 
-    # Tolerante a assinaturas diferentes — tentamos alguns nomes comuns:
-    result: Dict[str, Any] = {}
+    # Tentativas de chamada em ordem (assinaturas comuns)
+    errors: Dict[str, str] = {}
+
+    def ok(result: Any) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            return {"message": "Ingestão concluída.", "result": str(result)}
+        return result
+
     try:
+        # Preferimos método chamado "ingest_zip" se existir
         if hasattr(svc, "ingest_zip"):
-            # assinatura preferida
-            result = svc.ingest_zip(brand_name=brand_name, zip_bytes=zip_bytes)
-        elif hasattr(svc, "process_zip"):
-            result = svc.process_zip(brand_name=brand_name, zip_bytes=zip_bytes)
-        elif hasattr(svc, "run"):
-            result = svc.run(brand_name=brand_name, zip_bytes=zip_bytes)
-        else:
-            return jsonify({
-                "ok": False,
-                "error": (
-                    "Nenhum método de ingestão encontrado em IngestionService. "
-                    "Implemente um de: ingest_zip(brand_name, zip_bytes) | "
-                    "process_zip(brand_name, zip_bytes) | run(brand_name, zip_bytes)."
-                ),
-            }), 501
-    except Exception as e:
-        # Erro de ingestão — retornamos detalhes para facilitar debug
+            # 1) Posicional: (brand_name, zip_bytes)
+            try:
+                return jsonify({
+                    "ok": True,
+                    "brand_name": brand_name,
+                    "summary": {},
+                    "details": ok(getattr(svc, "ingest_zip")(brand_name, zip_bytes)),
+                }), 200
+            except TypeError as e:
+                errors["ingest_zip(brand, bytes)"] = str(e)
+
+            # 2) Posicional: (brand_name, BytesIO(zip_bytes))
+            try:
+                return jsonify({
+                    "ok": True,
+                    "brand_name": brand_name,
+                    "summary": {},
+                    "details": ok(getattr(svc, "ingest_zip")(brand_name, BytesIO(zip_bytes))),
+                }), 200
+            except TypeError as e:
+                errors["ingest_zip(brand, BytesIO)"] = str(e)
+
+            # 3) Nomeados comuns
+            for kw in ("zip_file", "data", "content", "blob", "file_bytes", "file", "stream"):
+                try:
+                    return jsonify({
+                        "ok": True,
+                        "brand_name": brand_name,
+                        "summary": {},
+                        "details": ok(getattr(svc, "ingest_zip")(brand_name=brand_name, **{kw: zip_bytes})),
+                    }), 200
+                except TypeError as e:
+                    errors[f"ingest_zip(brand, {kw}=bytes)"] = str(e)
+                except Exception as e:
+                    # Se entrou no método mas falhou por outro motivo, propaga
+                    return jsonify({"ok": False, "error": f"Falha na ingestão: {e}"}), 500
+
+        # Fallback p/ outros nomes comuns
+        for meth in ("process_zip", "run"):
+            if hasattr(svc, meth):
+                fn = getattr(svc, meth)
+                # 1) Posicional
+                try:
+                    return jsonify({
+                        "ok": True,
+                        "brand_name": brand_name,
+                        "summary": {},
+                        "details": ok(fn(brand_name, zip_bytes)),
+                    }), 200
+                except TypeError as e:
+                    errors[f"{meth}(brand, bytes)"] = str(e)
+
+                # 2) Posicional usando BytesIO
+                try:
+                    return jsonify({
+                        "ok": True,
+                        "brand_name": brand_name,
+                        "summary": {},
+                        "details": ok(fn(brand_name, BytesIO(zip_bytes))),
+                    }), 200
+                except TypeError as e:
+                    errors[f"{meth}(brand, BytesIO)"] = str(e)
+
+                # 3) Nomeados comuns
+                for kw in ("zip_file", "data", "content", "blob", "file_bytes", "file", "stream"):
+                    try:
+                        return jsonify({
+                            "ok": True,
+                            "brand_name": brand_name,
+                            "summary": {},
+                            "details": ok(fn(brand_name=brand_name, **{kw: zip_bytes})),
+                        }), 200
+                    except TypeError as e:
+                        errors[f"{meth}(brand, {kw}=bytes)"] = str(e)
+                    except Exception as e:
+                        return jsonify({"ok": False, "error": f"Falha na ingestão: {e}"}), 500
+
+        # Se chegou aqui: nenhuma assinatura casou
         return jsonify({
             "ok": False,
-            "error": f"Falha na ingestão: {e.__class__.__name__}: {e}",
-        }), 500
+            "error": (
+                "Nenhuma assinatura de ingestão compatível encontrada. "
+                "Tente implementar um dos formatos:\n"
+                "- ingest_zip(brand_name, zip_bytes)\n"
+                "- ingest_zip(brand_name, zip_file=... | data=... | content=... | blob=... | file_bytes=... | file=... | stream=...)\n"
+                "- process_zip(...)\n"
+                "- run(...)\n"
+                f"Detalhes de TypeError capturados: {errors}"
+            )
+        }), 501
 
-    # Normaliza a resposta
-    if not isinstance(result, dict):
-        result = {"message": "Ingestão concluída.", "result": str(result)}
-
-    # Estrutura sugerida de retorno
-    payload = {
-        "ok": True,
-        "brand_name": brand_name,
-        "summary": {
-            # Se o service já preencheu, aproveitamos; senão deixamos valores default
-            "assets_inserted": result.get("assets_inserted", 0),
-            "colors_inserted": result.get("colors_inserted", 0),
-            "warnings": result.get("warnings", []),
-        },
-        "details": result,  # ecoa tudo que o service devolveu p/ rastreio
-    }
-    return jsonify(payload), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Falha na ingestão: {e}"}), 500
