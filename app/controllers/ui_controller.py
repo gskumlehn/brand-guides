@@ -1,20 +1,11 @@
-# app/controllers/ui_controller.py
-import json
-from flask import Blueprint, render_template, current_app
+import logging
+from flask import Blueprint, render_template
+from ..utils.zip_utils import empty_colors_json
 
+logger = logging.getLogger(__name__)
 ui_bp = Blueprint("ui", __name__)
 
-EMPTY_COLORS_JSON = {
-    "primary":   {"name": "", "hex": ""},
-    "secondary": {"name": "", "hex": ""},
-    "others": []  # lista de {"name":"", "hex":""}
-}
-
-@ui_bp.route("/", methods=["GET"])
+@ui_bp.get("/")
 def index():
-    current_app.logger.info("Render ingestion UI")
-    # injeta o JSON de exemplo na página (mostra no <pre>{{ empty_colors_json }}</pre>)
-    return render_template(
-        "ingestion.html",
-        empty_colors_json=json.dumps(EMPTY_COLORS_JSON, ensure_ascii=False, indent=2),
-    )
+    logger.info("Render ingestion UI")
+    return render_template("ingestion.html", empty_colors_json=empty_colors_json())

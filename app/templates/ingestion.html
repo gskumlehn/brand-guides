@@ -21,29 +21,49 @@
       ul { margin:8px 0 0 18px; }
       .muted { color:var(--muted); }
       .kbd { border:1px solid var(--border); padding:2px 6px; border-radius:6px; background:#fafafa; font-family:inherit; }
-      .stack > * + * { margin-top:12px; } /* espacamento vertical entre elementos */
+      .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+      label { display:block; font-weight:600; margin-bottom:6px; }
+      input[type="text"], input[type="file"] {
+        width:100%; max-width: 360px; padding:10px 12px; border:1px solid var(--border); border-radius:10px;
+      }
+      .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+      .btn-primary { background:#000; color:#fff; border-color:#000; }
+      .btn-primary:hover { opacity:.9; }
     </style>
   </head>
   <body>
     <header>
       <h1>Ingestão de Arquivos do Guia de Marca</h1>
-      <p class="lead">Baixe o modelo, preencha as pastas e o <span class="kbd">colors.json</span>, compacte e envie.</p>
+      <p class="lead">Informe a marca, selecione o <span class="kbd">.zip</span> e envie. Se preferir, baixe o modelo, preencha e reenvie.</p>
     </header>
 
     <main>
-
-      <!-- Modelo de pastas & README -->
+      <!-- 1) Formulário de envio -->
       <section>
-        <div class="stack">
-          <h2>Modelo de pastas & README</h2>
-          <p class="muted">Estrutura completa, instruções por pasta e um <code>colors.json</code> vazio.</p>
-          <a class="btn" href="/ingestion/template.zip">⤓ Baixar .zip modelo</a>
+        <div>
+          <h2>Enviar pacote (.zip)</h2>
+          <p class="muted">Preencha o nome da marca exatamente como quer ver nas consultas e envie o arquivo .zip com a estrutura indicada abaixo.</p>
+          <form class="row" action="/ingest/upload" method="POST" enctype="multipart/form-data">
+            <div style="flex:1 1 260px; min-width:260px;">
+              <label for="brand_name">Nome da marca</label>
+              <input type="text" id="brand_name" name="brand_name" placeholder="Ex.: CCBA2" required />
+            </div>
+            <div style="flex:1 1 320px; min-width:260px;">
+              <label for="zip_file">Arquivo .zip</label>
+              <input type="file" id="zip_file" name="zip_file" accept=".zip,application/zip" required />
+            </div>
+            <div class="actions">
+              <button type="submit" class="btn btn-primary">Enviar para ingestão</button>
+              <a class="btn" href="/ingest/template.zip">⤓ Baixar .zip modelo</a>
+              <a class="btn" href="/ingest/colors.json">Ver <code>colors.json</code> vazio</a>
+            </div>
+          </form>
         </div>
       </section>
 
-      <!-- Estrutura de diretórios (visão geral) -->
+      <!-- 2) Estrutura -->
       <section>
-        <div class="stack">
+        <div>
           <h2>Estrutura de diretórios</h2>
           <pre><code>/
 ├─ logos/
@@ -51,109 +71,100 @@
 │  ├─ secondary_horizontal/
 │  ├─ secondary_vertical/
 │  └─ guidelines/
-│     ├─ primary/
-│     ├─ secondary_horizontal/
-│     └─ secondary_vertical/
 ├─ colors/
 │  ├─ colors.json
-│  └─ {NN}_*.jpg   (obrigatório NN_)
+│  └─ {NN}_*.jpg   (opcional; exige NN_)
 ├─ avatars/
+│  ├─ round/
+│  ├─ square/
+│  └─ app/
 ├─ applications/    (obrigatório NN_)
 ├─ graphics/
 ├─ icons/           (obrigatório NN_)
 └─ fonts/
 </code></pre>
+          <p class="muted">Observação: em pastas com NN_, apenas o prefixo <code>NN_</code> (ex.: <code>01_</code>, <code>02_</code>) é considerado na ordenação.</p>
         </div>
       </section>
 
-      <!-- LOGOS -->
+      <!-- 3) Logos e Guidelines -->
       <section>
-        <div class="stack">
-          <h2>LOGOS (PNG, sem NN_)</h2>
-          <p>Em <code>logos/{primary|secondary_horizontal|secondary_vertical}</code> use os arquivos abaixo. O nome do arquivo define a variação de cor aplicada:</p>
-          <pre><code>{variant}.png
-onde {variant} ∈ {primary, secondary, black, white}</code></pre>
-          <p>Exemplos:</p>
+        <div>
+          <h2>Logos (PNG, sem NN_)</h2>
+          <p>Coloque nas variantes <code>logos/{primary|secondary_horizontal|secondary_vertical}</code> os arquivos <strong>com nomes fixos</strong>:</p>
           <pre><code>primary.png
 secondary.png
 black.png
 white.png</code></pre>
-          <p class="muted">Formato: PNG (24 bits), fundo transparente.</p>
+
+          <h2 style="margin-top:18px">Guidelines das Logos (JPG, só NN_ importa)</h2>
+          <p>Dentro de <code>logos/guidelines/</code>:</p>
+          <pre><code>{NN}_.jpg
+Exemplos:
+01_.jpg
+02_.jpg</code></pre>
+          <p class="muted">O nome após o NN_ é ignorado; apenas a sequência NN_ é usada.</p>
         </div>
       </section>
 
-      <!-- GUIDELINES (abaixo de LOGOS) -->
+      <!-- 4) Colors -->
       <section>
-        <div class="stack">
-          <h2>GUIDELINES (JPG, com NN_)</h2>
-          <p>Dentro de <code>logos/guidelines/{primary|secondary_horizontal|secondary_vertical}</code> use o padrão:</p>
-          <pre><code>{NN}_{logoType}-{corPrincipal}_{corSecundária}.jpg
-onde logoType ∈ {primary, secondary_horizontal, secondary_vertical}
-     cores ∈ {primary, secondary, black, white}</code></pre>
-          <p>Exemplos:</p>
-          <pre><code>01_primary-primary_secondary.jpg
-02_secondary_horizontal-black_white.jpg</code></pre>
-        </div>
-      </section>
-
-      <!-- COLORS -->
-      <section>
-        <div class="stack">
-          <h2>COLORS</h2>
-          <p>Adicione <code>colors.json</code> e imagens .jpg <strong>com NN_</strong>.</p>
-          <a class="btn" href="/ingestion/colors.json">Baixar <code>colors.json</code> vazio</a>
-          <h3 style="margin:16px 0 6px;font-size:16px">Exemplo de <code>colors.json</code> vazio</h3>
+        <div>
+          <h2>Colors</h2>
+          <p>Inclua <code>colors/colors.json</code> e (opcionalmente) JPGs de amostra <strong>com NN_</strong>.</p>
+          <h3>Formato de <code>colors.json</code></h3>
           <pre><code>{{ empty_colors_json }}</code></pre>
         </div>
       </section>
 
-      <!-- APPLICATIONS -->
+      <!-- 5) Avatars -->
       <section>
-        <div class="stack">
-          <h2>APPLICATIONS (com NN_)</h2>
-          <p>Arquivos de aplicação devem começar com <code>NN_</code>:</p>
+        <div>
+          <h2>Avatars</h2>
+          <p>Subpastas: <code>avatars/{round|square|app}</code></p>
+          <p>Arquivos (PNG, sem NN_):</p>
+          <pre><code>primary.png
+secondary.png</code></pre>
+        </div>
+      </section>
+
+      <!-- 6) Applications -->
+      <section>
+        <div>
+          <h2>Applications (NN_ obrigatório)</h2>
           <pre><code>01_app-tile.png
 02_mock.jpg</code></pre>
         </div>
       </section>
 
-      <!-- ICONS -->
+      <!-- 7) Icons -->
       <section>
-        <div class="stack">
-          <h2>ICONS (com NN_)</h2>
-          <p>Arquivos de ícone devem começar com <code>NN_</code>:</p>
+        <div>
+          <h2>Icons (NN_ obrigatório)</h2>
           <pre><code>01_download.png
-02_upload.png</code></pre>
+02_upload.svg</code></pre>
         </div>
       </section>
 
-      <!-- AVATARS -->
+      <!-- 8) Graphics -->
       <section>
-        <div class="stack">
-          <h2>AVATARS</h2>
-          <p>.png/.jpg (numeração opcional). Lógica por cor será adicionada futuramente.</p>
+        <div>
+          <h2>Graphics</h2>
+          <p>.png/.jpg (numeração opcional)</p>
         </div>
       </section>
 
-      <!-- GRAPHICS -->
+      <!-- 9) Dicas -->
       <section>
-        <div class="stack">
-          <h2>GRAPHICS</h2>
-          <p>.png/.jpg (numeração opcional).</p>
-        </div>
-      </section>
-
-      <!-- Dicas finais -->
-      <section>
-        <div class="stack">
-          <h2>Dicas finais</h2>
+        <div>
+          <h2>Dicas</h2>
           <ul>
-            <li>Não altere nomes no frontend — nós preservamos o nome do arquivo do storage.</li>
-            <li>Antes de enviar, confira extensões e padrões de nomes.</li>
+            <li>Não alteramos/normalizamos nomes no backend — usamos o nome do storage como veio.</li>
+            <li>Em pastas com NN_, apenas o prefixo <code>NN_</code> é considerado.</li>
+            <li>Se precisar, baixe o <a href="/ingest/template.zip">.zip modelo</a> com a estrutura pronta e READMEs por pasta.</li>
           </ul>
         </div>
       </section>
-
     </main>
   </body>
 </html>

@@ -1,25 +1,9 @@
-CATEGORY_SYNONYMS = {
-    "logos": ["logos", "logo"],
-    "graphics": ["graphics", "grafics", "grafismos", "patterns", "pattern"],
-    "avatars": ["avatars", "avatar", "profiles"],
-    "icons": ["icons", "icones", "ícones"],
-    "fonts": ["fonts", "fontes"],
-    "colors": ["colors", "cores", "paleta", "palette"],
-    "applications": ["applications", "apps", "mockups", "aplicacoes", "aplicações"],
-}
+import re
+def is_png(name: str) -> bool: return name.lower().endswith(".png")
+def is_jpg(name: str) -> bool: return name.lower().endswith(".jpg") or name.lower().endswith(".jpeg")
 
-FLAT_CATEGORIES = ["icons", "fonts", "colors", "applications"]
-
-LOGO_SUBTYPE_SYNONYMS = {
-    "primary": ["prioritaria", "principal", "master", "primary"],
-    "secondary_vertical": ["secondary-vertical", "vertical", "vert", "secondary_vertical"],
-    "secondary_horizontal": ["secondary-horizontal", "horizontal", "horiz", "secondary_horizontal"],
-    "guidelines": ["reguas", "grid", "safe-area", "safearea", "guidelines"],
-}
-
-def resolve_canonical_category(first_component: str) -> str | None:
-    s = (first_component or "").strip().lower()
-    for canon, aliases in CATEGORY_SYNONYMS.items():
-        if s in aliases:
-            return canon
-    return None
+NN_RE = re.compile(r"^(\d{2})_")
+def has_nn_prefix(name: str) -> bool: return NN_RE.match(name) is not None
+def parse_nn(name: str) -> int:
+    m = NN_RE.match(name)
+    return int(m.group(1)) if m else 0
