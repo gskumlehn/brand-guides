@@ -1,3 +1,4 @@
+from typing import Dict, List
 from ..repositories.asset_repository import AssetRepository
 from ..utils.font_meta import (
     family_from_filename,
@@ -5,27 +6,27 @@ from ..utils.font_meta import (
     style_from_filename,
     ext_to_format
 )
+import os
 
+BASE = os.getenv("PUBLIC_BASE", "https://brand-guides-561373422085.southamerica-east1.run.app")
 
 class LovableService:
-
     def __init__(self):
         self.repo = AssetRepository()
 
-
-    def get_assets(
-        self,
-        *,
-        brand_name: str,
-        category: str,
-        subcategory: str | None = None
-    ):
-        return self.repo.list(
-            brand_name = brand_name,
-            category   = category,
-            subcategory = subcategory
-        )
-
+    def get_assets(self, brand_name: str, category: str, subcategory: str | None):
+        rows = self.repo.list(brand_name, category, subcategory)
+        out: List[Dict] = []
+        for r in rows:
+            # Montar stream_url e file_url sem mexer no path original
+            path = r["path"]
+            stream_url = f"{BASE}/stream/{path}"
+            file_url = f"{BASE}/files/{path}"
+            r_out = dict(r)
+            r_out["stream_url"] = stream_url
+            r_out["file_url"] = file_url
+            out.append(r_out)
+        return out
 
     def generate_webfonts_css(
         self,

@@ -1,140 +1,99 @@
 import os
-from functools import lru_cache
-from typing import Any, Iterable, List, Mapping, Optional
+from typing import Any, Dict, List, Optional
 
 from google.cloud import bigquery
+from google.cloud.bigquery import QueryJobConfig, ScalarQueryParameter
 from ..auth.credentials import load_credentials, resolve_project_id
 
 _DATASET = os.getenv("BQ_DATASET", "brand_guides")
+_TABLE = "assets"
 
-# Schema “esperado” da tabela assets
-ASSETS_FIELDS = [
-    ("brand_name",   "STRING",   "REQUIRED"),
-    ("category",     "STRING",   "REQUIRED"),
-    ("subcategory",  "STRING",   "NULLABLE"),
-    ("sequence",     "INT64",    "NULLABLE"),
-    ("original_name","STRING",   "NULLABLE"),
-    ("path",         "STRING",   "NULLABLE"),
-    ("url",          "STRING",   "NULLABLE"),
-    ("file_url",     "STRING",   "NULLABLE"),
-    ("stream_url",   "STRING",   "NULLABLE"),
-    ("created_at",   "TIMESTAMP","NULLABLE"),  # preenchido por app/ingestão
-]
+_client: Optional[bigquery.Client] = None
 
-@lru_cache(maxsize=1)
-def _creds():
-    return load_credentials()
 
-@lru_cache(maxsize=1)
-def _project():
-    return resolve_project_id(_creds())
-
-@lru_cache(maxsize=1)
 def client() -> bigquery.Client:
-    return bigquery.Client(project=_project(), credentials=_creds())
+    global _client
+    if _client is None:
+        creds = load_credentials()
+        project = resolve_project_id()
+        _client = bigquery.Client(credentials=creds, project=project)
+    return _client
+
 
 def fq(table: str) -> str:
-    return f"`{_project()}.{_DATASET}.{table}`"
-
-def ensure_dataset():
+    """Fully-qualified table."""
     c = client()
-    ds_id = f"{_project()}.{_DATASET}"
-    try:
-        c.get_dataset(ds_id)
-    except Exception:
-        c.create_dataset(bigquery.Dataset(ds_id), exists_ok=True)
+    return f"`{c.project}.{_DATASET}.{table}`"
 
-def _create_table_if_not_exists(table: str, fields: list[tuple[str,str,str]]):
+
+def ensure_assets_tables() -> None:
+    """
+    Garante que o dataset e a tabela existam e que as colunas novas estejam presentes.
+    """
     c = client()
-    table_id = f"{_project()}.{_DATASET}.{table}"
-    try:
-        c.get_table(table_id)
-        created = False
-    except Exception:
-        schema = [bigquery.SchemaField(n, t, mode=m) for (n,t,m) in fields]
-        c.create_table(bigquery.Table(table_id, schema=schema), exists_ok=True)
-        created = True
+    # 1) Dataset
+    c.query(f"CREATE SCHEMA IF NOT EXISTS `{c.project}.{_DATASET}`").result()
 
-    # Migrações idempotentes de colunas (ADD COLUMN IF NOT EXISTS)
-    # Garante que rodamos mesmo se a tabela já existia com schema antigo.
-    alter_fragments = []
-    for (name, typ, _mode) in fields:
-        if name == "created_at":
-            # TIP: se quiser default no BQ, use uma view; aqui garantimos só a coluna.
-            alter_fragments.append(f"ADD COLUMN IF NOT EXISTS {name} {typ}")
-        else:
-            alter_fragments.append(f"ADD COLUMN IF NOT EXISTS {name} {typ}")
-    sql = f"ALTER TABLE {fq(table)} " + ", ".join(alter_fragments)
-    # Rodamos o ALTER mesmo que nada precise ser adicionado (é idempotente)
-    client().query(sql).result()
-    return created
+    # 2) Tabela base (caso ainda não exista)
+    c.query(
+        f"""
+        CREATE TABLE IF NOT EXISTS {fq(_TABLE)} (
+          brand_name   STRING NOT NULL,
+          category     STRING NOT NULL,
+          subcategory  STRING,
+          original_name STRING NOT NULL,
+          path         STRING NOT NULL,
+          sequence     INT64,
+          url          STRING,
+          mime_type    STRING,
+          file_ext     STRING,
+          -- Novos metadados de logos/guidelines
+          logo_variant STRING,          -- 'primary' | 'secondary_horizontal' | 'secondary_vertical'
+          logo_color   STRING,          -- PNG: 'primary' | 'secondary' | 'black' | 'white'
+          color_primary STRING,         -- JPG guideline: 'primary' | 'secondary' | 'black' | 'white'
+          color_secondary STRING,       -- JPG guideline: idem
+          created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+        )
+        """
+    ).result()
 
-def ensure_assets_tables():
-    ensure_dataset()
-    _create_table_if_not_exists("assets", ASSETS_FIELDS)
-    _create_table_if_not_exists("assets_stage", ASSETS_FIELDS)
+    # 3) ADD COLUMN IF NOT EXISTS (idempotente para ambientes que já tinham a tabela)
+    alters = [
+        ("mime_type", "STRING"),
+        ("file_ext", "STRING"),
+        ("logo_variant", "STRING"),
+        ("logo_color", "STRING"),
+        ("color_primary", "STRING"),
+        ("color_secondary", "STRING"),
+        ("created_at", "TIMESTAMP"),
+    ]
+    for col, typ in alters:
+        c.query(f"ALTER TABLE {fq(_TABLE)} ADD COLUMN IF NOT EXISTS {col} {typ}").result()
 
-def q(sql: str, params: Optional[Mapping[str, Any]] = None) -> List[Mapping[str, Any]]:
+
+def _bq_param(name: str, value: Any) -> ScalarQueryParameter:
+    # Inferência simples de tipo
+    if isinstance(value, bool):
+        return ScalarQueryParameter(name, "BOOL", value)
+    if isinstance(value, int):
+        return ScalarQueryParameter(name, "INT64", value)
+    if isinstance(value, float):
+        return ScalarQueryParameter(name, "FLOAT64", value)
+    # None ou string/qualquer outro => STRING
+    return ScalarQueryParameter(name, "STRING", value)
+
+
+def q(sql: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """
+    Executa uma query como job (sem streaming). Retorna linhas como dict.
+    """
     job_config = None
     if params:
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[bigquery.ScalarQueryParameter(k, _infer_bq_type(v), v) for k, v in params.items()]
+        job_config = QueryJobConfig(
+            query_parameters=[_bq_param(k, v) for k, v in params.items()]
         )
     rows = client().query(sql, job_config=job_config).result()
-    return [dict(r.items()) for r in rows]
-
-# ----------------- LOAD JOB (sem streaming) -----------------
-def insert(table: str, rows: Iterable[Mapping[str, Any]]):
-    """
-    Faz LOAD JOB de JSON para {dataset}.{table}.
-    """
-    ensure_dataset()
-    c = client()
-    table_id = f"{_project()}.{_DATASET}.{table}"
-
-    # garante existência (e migra)
-    if table in ("assets", "assets_stage"):
-        _create_table_if_not_exists(table, ASSETS_FIELDS)
-
-    job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-        autodetect=False,
-        ignore_unknown_values=True,
-    )
-    load_job = c.load_table_from_json(list(rows), table_id, job_config=job_config)
-    load_job.result()
-    if load_job.errors:
-        raise RuntimeError(load_job.errors)
-# ------------------------------------------------------------
-
-def truncate(table: str):
-    client().query(f"TRUNCATE TABLE {fq(table)}").result()
-
-def merge_assets_from_stage(stage_table: str):
-    sql = f"""
-    MERGE {fq('assets')} T
-    USING {fq(stage_table)} S
-    ON  T.brand_name  = S.brand_name
-    AND T.category    = S.category
-    AND IFNULL(T.subcategory,'') = IFNULL(S.subcategory,'')
-    AND T.path        = S.path
-    WHEN MATCHED THEN UPDATE SET
-      sequence      = S.sequence,
-      original_name = S.original_name,
-      url           = S.url,
-      file_url      = S.file_url,
-      stream_url    = S.stream_url,
-      created_at    = S.created_at
-    WHEN NOT MATCHED THEN INSERT
-      (brand_name, category, subcategory, sequence, original_name, path, url, file_url, stream_url, created_at)
-    VALUES
-      (S.brand_name, S.category, S.subcategory, S.sequence, S.original_name, S.path, S.url, S.file_url, S.stream_url, S.created_at)
-    """
-    client().query(sql).result()
-
-def _infer_bq_type(v: Any) -> str:
-    if isinstance(v, bool): return "BOOL"
-    if isinstance(v, int): return "INT64"
-    if isinstance(v, float): return "FLOAT64"
-    return "STRING"
+    out = []
+    for r in rows:
+        out.append(dict(r.items()))
+    return out
