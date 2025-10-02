@@ -14,12 +14,21 @@ from ..utils.naming import safe_str
 from ..utils.validators import parse_nn
 
 HEX_RE = re.compile(r"#([0-9A-F]{3}|[0-9A-F]{6})$", re.IGNORECASE)
-INT_PREFIX = re.compile(r"^(\d{1,4})")  # ex.: "10_27@2x-100.jpg" -> 10
+INT_PREFIX = re.compile(r"^(\d{1,4})")
 
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".svg", ".pdf")
 FONT_EXTS = (".ttf", ".otf", ".woff", ".woff2")
 SKIP_BASENAMES = {"readme.txt", "readme.md", ".ds_store", "ds_store", ".dsstore"}
 
+CAT_CFG = {
+    "logos":         {"exts": IMG_EXTS,  "exclude": set(),            "subcategory": True},
+    "avatars":       {"exts": IMG_EXTS,  "exclude": set(),            "subcategory": True},
+    "applications":  {"exts": IMG_EXTS,  "exclude": set(),            "subcategory": False},
+    "graphics":      {"exts": IMG_EXTS,  "exclude": set(),            "subcategory": True},
+    "icons":         {"exts": IMG_EXTS,  "exclude": set(),            "subcategory": False},
+    "fonts":         {"exts": FONT_EXTS, "exclude": set(),            "subcategory": False},
+    "colors_assets": {"exts": IMG_EXTS,  "exclude": {"colors.json"},  "subcategory": True, "alias": "colors"},
+}
 
 def _normalize_hex(value: Optional[str]) -> Optional[str]:
     if not value:
@@ -35,29 +44,10 @@ def _normalize_hex(value: Optional[str]) -> Optional[str]:
 
 
 class IngestionService:
-    """
-    Estrutura esperada (case-insensitive, raiz flexível):
-    - logos/{primary|secondary_horizontal|secondary_vertical|guidelines}/<files>
-    - colors/colors.json
-    - avatars/{round|square|app}/<files>
-    - applications/<files>
-    - graphics/<subcategoria>/<files>
-    - icons/<files>
-    - fonts/<files>
-
-    Regras:
-    - Ignora arquivos ocultos/sistema (._*, .DS_Store, README.*).
-    - Deriva subcategoria como o segmento imediatamente após a categoria, se houver.
-    - sequence: usa parse_nn(basename) ou, se não houver, número inicial (INT_PREFIX).
-    - Faz upload dos arquivos para GCS e indexa na tabela BigQuery "assets".
-    - Cores: lê colors/colors.json e insere na tabela "colors".
-    """
 
     def __init__(self):
         self.gcs = GCSClient()
         self.bucket = os.getenv("GCS_BUCKET", "brand-guides")
-
-    # ---------------- COLORS ----------------
 
     def parse_colors_dict(self, brand_name: str, data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[str]]:
         rows: List[Dict[str, Any]] = []
@@ -68,14 +58,7 @@ class IngestionService:
             if not hx:
                 warnings.append(f"[colors] Ignorando '{role}' sem hex válido: {hex_value!r}")
                 return
-            rows.append(
-                {
-                    "brand_name": brand_name,
-                    "color_name": (name or "").strip(),
-                    "hex": hx,
-                    "role": role,
-                }
-            )
+            rows.append({"brand_name": brand_name, "color_name": (name or "").strip(), "hex": hx, "role": role})
 
         try:
             p = data.get("primary") or {}
@@ -132,8 +115,6 @@ class IngestionService:
         except Exception as e:
             return {"ok": False, "error": f"Falha ao ler colors.json: {e}"}
 
-    # ---------------- ASSETS ----------------
-
     def _guess_content_type(self, filename: str) -> str:
         return mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
@@ -145,15 +126,7 @@ class IngestionService:
             return f"brands/{brand_s}/{category_s}/{sub_s}/{basename}"
         return f"brands/{brand_s}/{category_s}/{basename}"
 
-    def _make_row(
-        self,
-        brand: str,
-        category: str,
-        subcategory: Optional[str],
-        seq: int,
-        basename: str,
-        blob_path: str,
-    ) -> Dict[str, Any]:
+    def _make_row(self, brand: str, category: str, subcategory: Optional[str], seq: int, basename: str, blob_path: str) -> Dict[str, Any]:
         return {
             "brand_name": brand,
             "category": category,
@@ -164,12 +137,7 @@ class IngestionService:
             "url": f"gs://{self.bucket}/{blob_path}",
         }
 
-    def _iter_category_files(
-        self,
-        zf: zipfile.ZipFile,
-        category: str,
-        allowed_exts: Tuple[str, ...],
-    ):
+    def _iter_category_files(self, zf: zipfile.ZipFile, category: str, allowed_exts: Tuple[str, ...], exclude: set[str]):
         cat = category.lower()
         for name in zf.namelist():
             low = name.lower().replace("\\", "/")
@@ -177,13 +145,13 @@ class IngestionService:
                 continue
             parts = [p for p in low.split("/") if p]
             if cat not in parts:
-                continue  # aceita pasta-raiz arbitrária (ex.: brand-guide-template/)
+                continue  # raiz flexível
             base = parts[-1]
-            if base.startswith("._") or base in SKIP_BASENAMES:
+            if base.startswith("._") or base in SKIP_BASENAMES or base in exclude:
                 continue
             if not any(base.endswith(ext) for ext in allowed_exts):
                 continue
-            yield name, parts  # devolve também os segmentos para derivar subcategoria
+            yield name, parts
 
     def _parse_sequence(self, basename: str) -> int:
         seq = parse_nn(basename) or 0
@@ -196,17 +164,19 @@ class IngestionService:
                     return 0
         return seq
 
-    def _ingest_generic(self, brand: str, zf: zipfile.ZipFile, category: str) -> Dict[str, Any]:
-        allowed_exts = FONT_EXTS if category.lower() == "fonts" else IMG_EXTS
+    def _ingest_category(self, brand: str, zf: zipfile.ZipFile, detail_key: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        # Permite usar alias de categoria (ex.: colors_assets grava como categoria "colors")
+        category = cfg.get("alias") or detail_key
+        exts: Tuple[str, ...] = cfg["exts"]
+        exclude: set[str] = cfg.get("exclude", set())
+
         inserted = 0
         warnings: List[str] = []
         rows: List[Dict[str, Any]] = []
 
-        for arcname, parts in self._iter_category_files(zf, category, allowed_exts):
+        for arcname, parts in self._iter_category_files(zf, category, exts, exclude):
             basename = parts[-1]
             cat_idx = parts.index(category.lower())
-            # subcategoria = segmento imediatamente após a categoria, apenas se houver pelo menos
-            # dois segmentos restantes (subcategoria + arquivo)
             subcat = parts[cat_idx + 1] if (cat_idx + 2) < len(parts) else None
 
             try:
@@ -234,26 +204,6 @@ class IngestionService:
 
         return {"ok": True, "inserted": inserted, "warnings": warnings}
 
-    def ingest_logos(self, brand: str, zf: zipfile.ZipFile) -> Dict[str, Any]:
-        return self._ingest_generic(brand, zf, "logos")
-
-    def ingest_avatars(self, brand: str, zf: zipfile.ZipFile) -> Dict[str, Any]:
-        return self._ingest_generic(brand, zf, "avatars")
-
-    def ingest_applications(self, brand: str, zf: zipfile.ZipFile) -> Dict[str, Any]:
-        return self._ingest_generic(brand, zf, "applications")
-
-    def ingest_graphics(self, brand: str, zf: zipfile.ZipFile) -> Dict[str, Any]:
-        return self._ingest_generic(brand, zf, "graphics")
-
-    def ingest_icons(self, brand: str, zf: zipfile.ZipFile) -> Dict[str, Any]:
-        return self._ingest_generic(brand, zf, "icons")
-
-    def ingest_fonts(self, brand: str, zf: zipfile.ZipFile) -> Dict[str, Any]:
-        return self._ingest_generic(brand, zf, "fonts")
-
-    # ---------------- ZIP (geral) ----------------
-
     def ingest_zip(self, brand_name: str, file_obj: io.BytesIO) -> Dict[str, Any]:
         brand_name = safe_str(brand_name)
         if not brand_name:
@@ -264,45 +214,25 @@ class IngestionService:
             with zipfile.ZipFile(file_obj) as zf:
                 details: Dict[str, Any] = {"brand_name": brand_name}
 
-                colors_res = self.ingest_colors_from_zip(brand_name, zf)
-                details["colors"] = colors_res
-                if not colors_res.get("ok"):
+                colors_json_res = self.ingest_colors_from_zip(brand_name, zf)
+                details["colors"] = colors_json_res
+                if not colors_json_res.get("ok"):
                     outer_ok = False
 
-                logos_res = self.ingest_logos(brand_name, zf)
-                avatars_res = self.ingest_avatars(brand_name, zf)
-                applications_res = self.ingest_applications(brand_name, zf)
-                graphics_res = self.ingest_graphics(brand_name, zf)
-                icons_res = self.ingest_icons(brand_name, zf)
-                fonts_res = self.ingest_fonts(brand_name, zf)
-
-                for k, res in {
-                    "logos": logos_res,
-                    "avatars": avatars_res,
-                    "applications": applications_res,
-                    "graphics": graphics_res,
-                    "icons": icons_res,
-                    "fonts": fonts_res,
-                }.items():
-                    details[k] = res
+                for detail_key, cfg in CAT_CFG.items():
+                    res = self._ingest_category(brand_name, zf, detail_key, cfg)
+                    details[detail_key] = res
                     if not res.get("ok"):
                         outer_ok = False
 
-                assets_total = sum(
-                    details[k].get("inserted", 0) for k in ("logos", "avatars", "applications", "graphics", "icons", "fonts")
-                )
+                assets_total = sum(details[k].get("inserted", 0) for k in CAT_CFG.keys())
                 colors_total = details["colors"].get("inserted", 0)
 
                 summary = {"assets": assets_total, "colors": colors_total}
                 details["summary"] = summary
                 details["ok"] = outer_ok
 
-                return {
-                    "ok": outer_ok,
-                    "brand_name": brand_name,
-                    "details": details,
-                    "summary": summary,
-                }
+                return {"ok": outer_ok, "brand_name": brand_name, "details": details, "summary": summary}
 
         except zipfile.BadZipFile:
             return {"ok": False, "error": "Arquivo enviado não é um ZIP válido."}
