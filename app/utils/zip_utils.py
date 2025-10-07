@@ -1,191 +1,159 @@
-import io
-import json
-import zipfile
-from typing import Dict
+# app/utils/zip_utils.py
+import io, json, zipfile
+from typing import Dict, List, Optional
 
+__all__ = [
+    "build_template_zip_bytes",
+    "default_spec",
+    "empty_colors_json",
+]
 
-def _w(z: zipfile.ZipFile, path: str, content: str = "") -> None:
-    """Escreve arquivo (ou diretório virtual) no zip."""
+README_ROOT_MD = """# Brand Package – Estrutura de Ingestão (Genérica)
+
+- Categorias: `NN-nome-da-categoria/`
+- Subcategorias:
+  - `NN-nome-da-subcategoria-NN` (com título; último NN = colunas `01..04`)
+  - `NN-NN` ou `NN--NN` (sem título)
+- Hífen em tudo (sem underscore).
+- `originais/` é opcional em qualquer categoria; **obrigatório** em `03-tipografia/`.
+- Em `02-cores/`: `colors.json` (obrigatório) + **opcionais** `principal.txt` e `secundaria.txt`.
+- **Textos**: qualquer `.txt` colocado diretamente na pasta da **categoria** ou da **subcategoria** será ingerido (nome não importa, exceto em `02-cores`).
+"""
+
+README_CATEGORY_MD = """# Categoria
+
+Coloque aqui **opcionalmente** arquivos `.txt` com instruções/descrições da categoria (nomes livres).
+Se usar `originais/`, os arquivos serão disponibilizados para download no front.
+
+Subpastas aceitas:
+- `NN-nome-da-subcategoria-NN`
+- `NN-NN` ou `NN--NN` (sem título)
+
+Dentro de cada subpasta:
+- `.txt` (nomes livres) → texto da subcategoria
+- imagens/arquivos → exibidos conforme `columns` (NN final)
+"""
+
+def empty_colors_json() -> str:
+    return json.dumps({
+        "colors": [
+            {
+              "category": "main",
+              "subcategory": "primary",
+              "label": "Verde Escuro",
+              "hex": "#003C2D",
+              "RGB": "0,60,45",
+              "CMYK": "93,5,75,70",
+              "Pantone": "343 C",
+              "sequence": 1
+            }
+        ]
+    }, ensure_ascii=False, indent=2)
+
+def _colors_json_full() -> str:
+    return json.dumps({
+        "colors": [
+            {
+              "category": "main",
+              "subcategory": "primary",
+              "label": "Verde Escuro",
+              "hex": "#003C2D",
+              "RGB": "0,60,45",
+              "CMYK": "93,5,75,70",
+              "Pantone": "343 C",
+              "sequence": 1
+            },
+            {
+              "category": "secondary",
+              "label": "Azul",
+              "hex": "#4F71F6",
+              "RGB": "79,113,246",
+              "CMYK": "79,55,0,4",
+              "Pantone": "2727 C",
+              "sequence": 2
+            }
+        ]
+    }, ensure_ascii=False, indent=2)
+
+def _w(z: zipfile.ZipFile, path: str, content: Optional[str] = "") -> None:
     if path.endswith("/"):
         z.writestr(path, "")
     else:
-        z.writestr(path, content)
+        z.writestr(path, content if content is not None else "")
 
-
-def get_empty_colors_data() -> Dict:
-    """Retorna o dicionário base vazio para colors.json."""
-    return {
-        "brand_name": "",
-        "colors": {
-            "primary":   {"name": "", "hex": ""},
-            "secondary": {"name": "", "hex": ""},
-            "others": []
-        }
-    }
-
-
-def empty_colors_json() -> str:
-    """Retorna o JSON (string) formatado do colors.json vazio."""
-    return json.dumps(get_empty_colors_data(), ensure_ascii=False, indent=2)
-
-
-def _readme_root() -> str:
-    return """Brand Guides — Estrutura de Ingestão
-
-Preencha as pastas conforme as instruções dos READMEs específicos.
-Após organizar os arquivos, compacte tudo como .zip e envie na tela de Ingestão.
-
-Resumo:
-- logos/
-  - primary/ (PNG, nomes: primary.png | secondary.png | black.png | white.png)
-  - secondary_horizontal/ (PNG, mesmos nomes)
-  - secondary_vertical/ (PNG, mesmos nomes)
-  - guidelines/ (JPG, lista simples por sequência NN_: 01_.jpg, 02_.jpg, ...)
-- colors/
-  - colors.json (estrutura de cores)
-  - {NN}_*.jpg (amostras, obrigatório NN_)
-- avatars/
-  - round/  (PNG: primary.png | secondary.png)
-  - square/ (PNG: primary.png | secondary.png)
-  - app/    (PNG: primary.png | secondary.png)
-- applications/ (arquivos com NN_, ex: 01_mock.jpg)
-- graphics/ (opcional)
-- icons/ (arquivos com NN_, ex: 01_download.png)
-- fonts/ (opcional)
-"""
-
-
-def _readme_logos() -> str:
-    return """LOGOS
-
-As logos devem ser PNG (fundo transparente).
-
-Subpastas obrigatórias:
-- logos/primary/
-- logos/secondary_horizontal/
-- logos/secondary_vertical/
-
-Em cada uma dessas pastas, use exatamente estes nomes de arquivo:
-- primary.png      → logo com a cor principal
-- secondary.png    → logo com a cor secundária
-- black.png        → logo em preto
-- white.png        → logo em branco
-
-GUIDELINES (JPG)
-- A pasta logos/guidelines/ é uma lista simples baseada em sequência.
-- Nomemclatura: NN_.jpg  (por exemplo: 01_.jpg, 02_.jpg, 03_.jpg)
-- O nome após o NN_ não é utilizado; apenas a ordem NN_ importa.
-"""
-
-
-def _readme_colors() -> str:
-    return """COLORS
-
-Dentro de colors/:
-- colors.json  → arquivo JSON com as cores
-- {NN}_*.jpg   → amostras de cor (obrigatório prefixo NN_)
-
-Estrutura esperada de colors.json:
-
-{
-  "brand_name": "SUA-MARCA",
-  "colors": {
-    "primary":   {"name": "Nome da cor principal",   "hex": "#RRGGBB"},
-    "secondary": {"name": "Nome da cor secundária",  "hex": "#RRGGBB"},
-    "others": [
-      {"name": "Cor 1", "hex": "#RRGGBB"},
-      {"name": "Cor 2", "hex": "#RRGGBB"}
+def default_spec() -> List[Dict]:
+    return [
+        {
+            "category_dir": "01-categoria-a",
+            "with_texts": ["descricao-categoria.txt"],
+            "with_originais": True,
+            "originais_files": ["arquivo.ai", "manual.pdf"],
+            "subs": [
+                {"dir": "01-hero-01", "texts": ["notas.txt"], "files": ["01.png", "02.png"]},
+                {"dir": "02-02", "texts": ["sub.txt"], "files": ["01.png", "02.png"]},
+            ],
+        },
+        {
+            "category_dir": "02-cores",
+            "with_texts": [],
+            "colors_json": True
+        },
+        {
+            "category_dir": "03-tipografia",
+            "with_texts": ["tipos.txt"],
+            "with_originais": True,
+            "originais_files": ["fontes.zip"],
+            "subs": [
+                {"dir": "01-titulos-01", "texts": ["sugestoes.txt"], "files": ["01.png"]},
+                {"dir": "02-corpo-02", "texts": [], "files": ["01.png", "02.png"]},
+            ],
+        },
+        {
+            "category_dir": "04-categoria-b",
+            "with_texts": ["desc.txt"],
+            "with_originais": False,
+            "subs": [
+                {"dir": "01-conjuntos-03", "texts": ["bloco.txt"], "files": ["01.png", "02.png", "03.png"]}
+            ],
+        },
     ]
-  }
-}
 
-Observações:
-- Não inclua campo priority, source_path ou source_file.
-- Hex deve estar no formato #RRGGBB.
-"""
+def _write_category(z: zipfile.ZipFile, root: str, spec: Dict) -> None:
+    cat = spec["category_dir"].rstrip("/")
+    cat_path = f"{root}{cat}/"
+    _w(z, cat_path)
+    _w(z, f"{cat_path}README.md", README_CATEGORY_MD)
 
+    for t in spec.get("with_texts", []):
+        _w(z, f"{cat_path}{t}", f"Texto livre da categoria {cat}.\n")
 
-def _readme_avatars() -> str:
-    return """AVATARS
+    # pasta especial 'cores'
+    if cat.split("-", 1)[-1] == "cores":
+        _w(z, f"{cat_path}colors.json", _colors_json_full())
+        _w(z, f"{cat_path}principal.txt", "Texto para cores principais (main/primary).")
+        _w(z, f"{cat_path}secundaria.txt", "Texto para cores secundárias (secondary).")
+        return
 
-Subpastas:
-- avatars/round/
-- avatars/square/
-- avatars/app/
+    if spec.get("with_originais"):
+        _w(z, f"{cat_path}originais/")
+        for f in spec.get("originais_files", []):
+            _w(z, f"{cat_path}originais/{f}", "")
 
-Arquivos aceitos: PNG
-Nomes dos arquivos (por cor):
-- primary.png
-- secondary.png
+    for sub in spec.get("subs", []):
+        subdir = sub["dir"].rstrip("/")
+        sub_path = f"{cat_path}{subdir}/"
+        _w(z, sub_path)
+        for t in sub.get("texts", []):
+            _w(z, f"{sub_path}{t}", f"Texto livre da subcategoria {subdir}.\n")
+        for f in sub.get("files", []):
+            _w(z, f"{sub_path}{f}", "")
 
-A lógica para outras cores pode ser adicionada futuramente.
-"""
-
-
-def _readme_applications() -> str:
-    return """APPLICATIONS
-
-Arquivos com numeração NN_ obrigatória.
-Exemplos:
-- 01_tile.png
-- 02_mock.jpg
-"""
-
-
-def _readme_icons() -> str:
-    return """ICONS
-
-Arquivos com numeração NN_ obrigatória.
-Exemplos:
-- 01_download.png
-- 02_upload.png
-"""
-
-
-def _readme_graphics() -> str:
-    return """GRAPHICS
-
-Arquivos .png/.jpg (numeração opcional).
-"""
-
-
-def build_template_zip_bytes() -> bytes:
-    """
-    Gera um ZIP em memória com a estrutura de pastas e READMEs,
-    além de um colors.json vazio de exemplo.
-    """
-    mem = io.BytesIO()
-    with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        # Diretórios (com barra no fim para criar a entrada)
-        dirs = [
-            "logos/",
-            "logos/primary/",
-            "logos/secondary_horizontal/",
-            "logos/secondary_vertical/",
-            "logos/guidelines/",
-            "colors/",
-            "avatars/",
-            "avatars/round/",
-            "avatars/square/",
-            "avatars/app/",
-            "applications/",
-            "graphics/",
-            "icons/",
-            "fonts/",
-        ]
-        for d in dirs:
-            _w(z, d, "")
-
-        # READMEs
-        _w(z, "README.txt", _readme_root())
-        _w(z, "logos/README.txt", _readme_logos())
-        _w(z, "colors/README.txt", _readme_colors())
-        _w(z, "avatars/README.txt", _readme_avatars())
-        _w(z, "applications/README.txt", _readme_applications())
-        _w(z, "icons/README.txt", _readme_icons())
-        _w(z, "graphics/README.txt", _readme_graphics())
-
-        # colors.json vazio
-        _w(z, "colors/colors.json", empty_colors_json())
-
-    return mem.getvalue()
+def build_template_zip_bytes(spec: Optional[List[Dict]] = None, root_dir: str = "brand-package/") -> bytes:
+    spec = spec or default_spec()
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        _w(z, root_dir)
+        _w(z, f"{root_dir}README.md", README_ROOT_MD)
+        for cat in spec:
+            _write_category(z, root=root_dir, spec=cat)
+    return bio.getvalue()

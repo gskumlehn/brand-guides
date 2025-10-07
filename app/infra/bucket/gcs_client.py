@@ -1,25 +1,22 @@
-import mimetypes
+# app/infra/bucket/gcs_client.py
+import os
+from typing import Optional
 from google.cloud import storage
 from ..auth.credentials import load_credentials, resolve_project_id
 
 class GCSClient:
-    def __init__(self):
+    def __init__(self) -> None:
         creds = load_credentials()
         self.client = storage.Client(project=resolve_project_id(creds), credentials=creds)
 
-    def read_object(self, bucket_name: str, blob_path: str):
-        bucket = self.client.bucket(bucket_name)
-        blob = bucket.blob(blob_path)
-        data = blob.download_as_bytes()
-        content_type = mimetypes.guess_type(blob_path)[0]
-        filename = blob_path.split("/")[-1]
-        return data, content_type, filename
+    def bucket(self, bucket_name: Optional[str] = None):
+        name = bucket_name or os.getenv("GCS_BUCKET", "")
+        return self.client.bucket(name)
 
-    def write_object(self, bucket_name: str, blob_path: str, data: bytes, content_type: str | None = None) -> str:
-        bucket = self.client.bucket(bucket_name)
-        blob = bucket.blob(blob_path)
-        if content_type:
-            blob.upload_from_string(data, content_type=content_type)
-        else:
-            blob.upload_from_string(data)
-        return f"gs://{bucket_name}/{blob_path}"
+    def write_object(self, bucket_name: str, path: str, content: bytes, content_type: str) -> str:
+        b = self.bucket(bucket_name)
+        blob = b.blob(path)
+        blob.upload_from_string(content, content_type=content_type)
+        blob.cache_control = "public, max-age=31536000"
+        blob.patch()
+        return f"https://storage.googleapis.com/{bucket_name}/{path}"

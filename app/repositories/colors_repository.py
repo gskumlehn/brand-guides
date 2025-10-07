@@ -6,15 +6,19 @@ class ColorsRepository:
         sql = f"""
         SELECT
           brand_name,
-          color_name,
+          palette_key,
+          color_key,
+          color_label,
           hex,
+          rgb_txt,
+          cmic_txt,
+          recs_txt,
           role,
+          sequence,
           created_at
-        FROM {fq('colors')}
+        FROM {fq('color')}
         WHERE LOWER(brand_name) = LOWER(@brand_name)
-        ORDER BY role, color_name
+        ORDER BY COALESCE(sequence, 0), role, color_label
         """
-        params = {
-            "brand_name": brand_name,
-        }
+        params = {"brand_name": brand_name}
         return q(sql, params=params)

@@ -1,170 +1,28 @@
-<!doctype html>
-<html lang="pt-br">
-  <head>
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1"/>
-    <title>Ingestão – Brand Guides</title>
-    <style>
-      :root { --fg:#111; --bg:#fff; --muted:#777; --border:#ddd; }
-      * { box-sizing:border-box; }
-      body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial; color:var(--fg); background:var(--bg); }
-      header { padding:24px; border-bottom:1px solid var(--border); }
-      main { max-width: 980px; margin: 0 auto; padding: 24px; }
-      h1 { font-size: 28px; margin: 0 0 12px; }
-      p.lead { color:var(--muted); margin:0; }
-      section { border:1px solid var(--border); border-radius:14px; padding:20px; margin:20px 0; }
-      h2 { font-size:20px; margin:0 0 10px; }
-      pre { background:#f7f7f7; border:1px solid var(--border); padding:12px; overflow:auto; border-radius:10px; }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
-      .btn { display:inline-block; padding:10px 14px; border:1px solid #000; color:#000; text-decoration:none; border-radius:999px; }
-      .btn:hover { background:#000; color:#fff; }
-      ul { margin:8px 0 0 18px; }
-      .muted { color:var(--muted); }
-      .kbd { border:1px solid var(--border); padding:2px 6px; border-radius:6px; background:#fafafa; font-family:inherit; }
-      .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-      label { display:block; font-weight:600; margin-bottom:6px; }
-      input[type="text"], input[type="file"] {
-        width:100%; max-width: 360px; padding:10px 12px; border:1px solid var(--border); border-radius:10px;
-      }
-      .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
-      .btn-primary { background:#000; color:#fff; border-color:#000; }
-      .btn-primary:hover { opacity:.9; }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>Ingestão de Arquivos do Guia de Marca</h1>
-      <p class="lead">Informe a marca, selecione o <span class="kbd">.zip</span> e envie. Se preferir, baixe o modelo, preencha e reenvie.</p>
-    </header>
-
-    <main>
-      <!-- 1) Formulário de envio -->
-      <section>
-        <div>
-          <h2>Enviar pacote (.zip)</h2>
-          <p class="muted">Preencha o nome da marca exatamente como quer ver nas consultas e envie o arquivo .zip com a estrutura indicada abaixo.</p>
-          <form class="row" action="/ingest/upload" method="POST" enctype="multipart/form-data">
-            <div style="flex:1 1 260px; min-width:260px;">
-              <label for="brand_name">Nome da marca</label>
-              <input type="text" id="brand_name" name="brand_name" placeholder="Ex.: CCBA2" required />
-            </div>
-            <div style="flex:1 1 320px; min-width:260px;">
-              <label for="zip_file">Arquivo .zip</label>
-              <input type="file" id="zip_file" name="zip_file" accept=".zip,application/zip" required />
-            </div>
-            <div class="actions">
-              <button type="submit" class="btn btn-primary">Enviar para ingestão</button>
-              <a class="btn" href="/ingest/template.zip">⤓ Baixar .zip modelo</a>
-              <a class="btn" href="/ingest/colors.json">Ver <code>colors.json</code> vazio</a>
-            </div>
-          </form>
-        </div>
-      </section>
-
-      <!-- 2) Estrutura -->
-      <section>
-        <div>
-          <h2>Estrutura de diretórios</h2>
-          <pre><code>/
-├─ logos/
-│  ├─ primary/
-│  ├─ secondary_horizontal/
-│  ├─ secondary_vertical/
-│  └─ guidelines/
-├─ colors/
-│  ├─ colors.json
-│  └─ {NN}_*.jpg   (opcional; exige NN_)
-├─ avatars/
-│  ├─ round/
-│  ├─ square/
-│  └─ app/
-├─ applications/    (obrigatório NN_)
-├─ graphics/
-├─ icons/           (obrigatório NN_)
-└─ fonts/
+<!-- templates/ingestion.html (seções alteradas para 'cores' e textos nomeados) -->
+<section>
+  <h2>Estrutura (genérica, hífens)</h2>
+  <pre><code>brand-package/
+├─ 01-categoria-a/
+│  ├─ README.md
+│  ├─ descricao.txt
+│  ├─ originais/
+│  │  └─ manual.pdf
+│  └─ 01-hero-01/
+│     ├─ notas.txt
+│     └─ 01-a.png
+├─ 02-cores/
+│  ├─ README.md
+│  ├─ principal.txt             (opcional: texto para cores principais)
+│  ├─ secundaria.txt            (opcional: texto para cores secundárias)
+│  └─ colors.json               (obrigatório)
+├─ 03-tipografia/
+│  ├─ README.md
+│  ├─ originais/
+│  │  └─ fontes.zip
+│  └─ 01-titulos-01/
+│     └─ 01-h1.png
+└─ 04-categoria-b/
+   └─ 01-conjuntos-03/
+      └─ 01-a.png
 </code></pre>
-          <p class="muted">Observação: em pastas com NN_, apenas o prefixo <code>NN_</code> (ex.: <code>01_</code>, <code>02_</code>) é considerado na ordenação.</p>
-        </div>
-      </section>
-
-      <!-- 3) Logos e Guidelines -->
-      <section>
-        <div>
-          <h2>Logos (PNG, sem NN_)</h2>
-          <p>Coloque nas variantes <code>logos/{primary|secondary_horizontal|secondary_vertical}</code> os arquivos <strong>com nomes fixos</strong>:</p>
-          <pre><code>primary.png
-secondary.png
-black.png
-white.png</code></pre>
-
-          <h2 style="margin-top:18px">Guidelines das Logos (JPG, só NN_ importa)</h2>
-          <p>Dentro de <code>logos/guidelines/</code>:</p>
-          <pre><code>{NN}_.jpg
-Exemplos:
-01_.jpg
-02_.jpg</code></pre>
-          <p class="muted">O nome após o NN_ é ignorado; apenas a sequência NN_ é usada.</p>
-        </div>
-      </section>
-
-      <!-- 4) Colors -->
-      <section>
-        <div>
-          <h2>Colors</h2>
-          <p>Inclua <code>colors/colors.json</code> e (opcionalmente) JPGs de amostra <strong>com NN_</strong>.</p>
-          <h3>Formato de <code>colors.json</code></h3>
-          <pre><code>{{ empty_colors_json }}</code></pre>
-        </div>
-      </section>
-
-      <!-- 5) Avatars -->
-      <section>
-        <div>
-          <h2>Avatars</h2>
-          <p>Subpastas: <code>avatars/{round|square|app}</code></p>
-          <p>Arquivos (PNG, sem NN_):</p>
-          <pre><code>primary.png
-secondary.png</code></pre>
-        </div>
-      </section>
-
-      <!-- 6) Applications -->
-      <section>
-        <div>
-          <h2>Applications (NN_ obrigatório)</h2>
-          <pre><code>01_app-tile.png
-02_mock.jpg</code></pre>
-        </div>
-      </section>
-
-      <!-- 7) Icons -->
-      <section>
-        <div>
-          <h2>Icons (NN_ obrigatório)</h2>
-          <pre><code>01_download.png
-02_upload.svg</code></pre>
-        </div>
-      </section>
-
-      <!-- 8) Graphics -->
-      <section>
-        <div>
-          <h2>Graphics</h2>
-          <p>.png/.jpg (numeração opcional)</p>
-        </div>
-      </section>
-
-      <!-- 9) Dicas -->
-      <section>
-        <div>
-          <h2>Dicas</h2>
-          <ul>
-            <li>Não alteramos/normalizamos nomes no backend — usamos o nome do storage como veio.</li>
-            <li>Em pastas com NN_, apenas o prefixo <code>NN_</code> é considerado.</li>
-            <li>Se precisar, baixe o <a href="/ingest/template.zip">.zip modelo</a> com a estrutura pronta e READMEs por pasta.</li>
-          </ul>
-        </div>
-      </section>
-    </main>
-  </body>
-</html>
+</section>

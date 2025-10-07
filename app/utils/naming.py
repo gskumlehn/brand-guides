@@ -1,34 +1,20 @@
-import os
+# app/utils/naming.py
 import re
-from typing import Optional, Tuple
+import unicodedata
 
-# Reconhece prefixo NN_ no início do arquivo (ex.: 01_nome.jpg)
-_NN_RE = re.compile(r'^(?P<nn>\d{2})_')
+def _to_ascii(s: str) -> str:
+    return (
+        unicodedata.normalize("NFKD", s)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
 
-def safe_str(value: Optional[str]) -> str:
-    """
-    Retorna string "segura" apenas removendo espaços nas pontas.
-    Não normaliza, não troca acentos, não altera codificações.
-    """
-    return (value or "").strip()
+def slug(s: str) -> str:
+    s = _to_ascii(s or "")
+    s = s.strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s
 
-def split_stem_ext(filename: str) -> Tuple[str, str]:
-    """
-    Separa nome e extensão. Extensão é retornada em minúsculas sem o ponto.
-    Ex.: 'Foto.PNG' -> ('Foto', 'png')
-    """
-    stem, ext = os.path.splitext(filename)
-    return stem, ext.lower().lstrip('.')
-
-def extract_nn_prefix(filename: str) -> Optional[int]:
-    """
-    Extrai o prefixo NN_ do início do arquivo.
-    Ex.: '01_cartaz.jpg' -> 1 ; 'cartaz.jpg' -> None
-    """
-    m = _NN_RE.match(filename)
-    if not m:
-        return None
-    try:
-        return int(m.group('nn'))
-    except Exception:
-        return None
+def safe_str(s: str | None) -> str:
+    return slug(s or "")
