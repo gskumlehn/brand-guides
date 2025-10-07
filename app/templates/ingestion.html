@@ -1,28 +1,121 @@
-<!-- templates/ingestion.html (seções alteradas para 'cores' e textos nomeados) -->
-<section>
-  <h2>Estrutura (genérica, hífens)</h2>
-  <pre><code>brand-package/
+<!-- templates/ingestion.html (troque links hardcoded por url_for) -->
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Ingestão – Brand Guides</title>
+    <style>
+      :root { --fg:#111; --bg:#fff; --muted:#777; --border:#ddd; }
+      * { box-sizing:border-box; }
+      body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial; color:var(--fg); background:var(--bg); }
+      header { padding:24px; border-bottom:1px solid var(--border); }
+      main { max-width: 980px; margin: 0 auto; padding: 24px; }
+      h1 { font-size: 28px; margin: 0 0 12px; }
+      p.lead { color:var(--muted); margin:0; }
+      section { border:1px solid var(--border); border-radius:14px; padding:20px; margin:20px 0; }
+      h2 { font-size:20px; margin:0 0 10px; }
+      pre { background:#f7f7f7; border:1px solid var(--border); padding:12px; overflow:auto; border-radius:10px; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
+      .btn { display:inline-block; padding:10px 14px; border:1px solid #000; color:#000; text-decoration:none; border-radius:999px; }
+      .btn:hover { background:#000; color:#fff; }
+      ul { margin:8px 0 0 18px; }
+      .muted { color:var(--muted); }
+      .kbd { border:1px solid var(--border); padding:2px 6px; border-radius:6px; background:#fafafa; font-family:inherit; }
+      .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+      label { display:block; font-weight:600; margin-bottom:6px; }
+      input[type="text"], input[type="file"] {
+        width:100%; max-width: 360px; padding:10px 12px; border:1px solid var(--border); border-radius:10px;
+      }
+      .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+      .btn-primary { background:#000; color:#fff; border-color:#000; }
+      .btn-primary:hover { opacity:.9; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Ingestão de Arquivos do Guia de Marca</h1>
+      <p class="lead">Informe a marca, selecione o <span class="kbd">.zip</span> e envie. Baixe o modelo se precisar.</p>
+    </header>
+
+    <main>
+      <section>
+        <h2>Enviar pacote (.zip)</h2>
+        <p class="muted">Preencha o nome da marca exatamente como quer ver nas consultas e envie o arquivo .zip com a estrutura indicada abaixo.</p>
+        <form class="row" action="/ingest/upload" method="POST" enctype="multipart/form-data">
+          <div style="flex:1 1 260px; min-width:260px;">
+            <label for="brand_name">Nome da marca</label>
+            <input type="text" id="brand_name" name="brand_name" placeholder="Ex.: CCBA2" required />
+          </div>
+          <div style="flex:1 1 320px; min-width:260px;">
+            <label for="zip_file">Arquivo .zip</label>
+            <input type="file" id="zip_file" name="zip_file" accept=".zip,application/zip" required />
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn btn-primary">Enviar para ingestão</button>
+            <a class="btn" href="{{ url_for('ui.template_zip') }}">⤓ Baixar .zip modelo</a>
+            <a class="btn" href="{{ url_for('ui.colors_json') }}">Ver exemplo de <code>colors.json</code></a>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <h2>Estrutura de diretórios (genérica, hífens)</h2>
+        <pre><code>brand-package/
 ├─ 01-categoria-a/
 │  ├─ README.md
-│  ├─ descricao.txt
+│  ├─ &lt;qualquer-texto&gt;.txt
 │  ├─ originais/
-│  │  └─ manual.pdf
+│  │  └─ &lt;arquivos-originais&gt;
 │  └─ 01-hero-01/
-│     ├─ notas.txt
-│     └─ 01-a.png
+│     ├─ &lt;qualquer-texto&gt;.txt
+│     ├─ 01.png
+│     └─ 02.jpg
 ├─ 02-cores/
 │  ├─ README.md
-│  ├─ principal.txt             (opcional: texto para cores principais)
-│  ├─ secundaria.txt            (opcional: texto para cores secundárias)
-│  └─ colors.json               (obrigatório)
+│  ├─ colors.json
+│  ├─ principal.txt
+│  └─ secundaria.txt
 ├─ 03-tipografia/
 │  ├─ README.md
+│  ├─ &lt;qualquer-texto&gt;.txt
 │  ├─ originais/
-│  │  └─ fontes.zip
+│  │  └─ &lt;fontes-manual&gt;
 │  └─ 01-titulos-01/
-│     └─ 01-h1.png
+│     ├─ &lt;qualquer-texto&gt;.txt
+│     ├─ 01.png
+│     └─ 02.png
 └─ 04-categoria-b/
    └─ 01-conjuntos-03/
-      └─ 01-a.png
+      ├─ &lt;qualquer-texto&gt;.txt
+      ├─ 01.png
+      ├─ 02.png
+      └─ 03.png
 </code></pre>
-</section>
+        <ul>
+          <li>Pastas com hífen: <code>NN-nome</code> e <code>NN-nome-NN</code>.</li>
+          <li>Sem título: <code>NN-NN</code> ou <code>NN--NN</code>.</li>
+          <li><strong>originais/</strong> opcional; obrigatório em <strong>03-tipografia/</strong>.</li>
+          <li>Textos livres em categoria/subcategoria (exceto em <strong>02-cores</strong>: nomes fixos).</li>
+          <li>Imagens podem ser apenas números: <code>01.png</code>, <code>02.jpg</code>…</li>
+          <li>Se terminar com <code>-02</code>, número de arquivos da subpasta deve ser par.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Formato de <code>colors.json</code></h2>
+        <p class="muted">Categorias: <code>main</code> ou <code>secondary</code>. Subcategorias de <code>main</code>: <code>primary</code>, <code>secondary</code>, <code>others</code>.</p>
+        <pre><code>{{ empty_colors_json }}</code></pre>
+      </section>
+
+      <section>
+        <h2>Dicas</h2>
+        <ul>
+          <li>Ordem = números no início de pastas/arquivos.</li>
+          <li>Nomes não são normalizados no backend.</li>
+          <li>Baixe o <a href="{{ url_for('ui.template_zip') }}">.zip modelo</a>.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
