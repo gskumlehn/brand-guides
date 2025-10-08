@@ -61,16 +61,6 @@ class AssetsRepository:
         category_key: Optional[str] = None,
         subcategory_seq: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Retorna galeria por categoria.
-        Para cada subcategoria inclui:
-          - subcategory_seq
-          - columns
-          - subcategory_text (se existir)
-          - images (detalhes)
-          - stream (lista de URLs em ordem de sequence)
-          - stream_url (endpoint de stream para a subcategoria)
-        """
         base_where = ["brand_name = @brand"]
         params: Dict[str, Any] = {"brand": brand}
         if category_key:
@@ -133,7 +123,6 @@ class AssetsRepository:
                 "category_label": s["category_label"],
                 "category_seq": s["category_seq"],
                 "category_text": cat_text_map.get(cat_key) or "",
-                "category_stream_url": f"/assets/stream?brand_name={brand}&category_key={cat_key}",
                 "subcategories": []
             })
 
@@ -146,21 +135,22 @@ class AssetsRepository:
 
             if s["subcategory_key"] in (None, ""):
                 img_where.append("(subcategory_key IS NULL OR subcategory_key = '')")
-                stream_url = f"/assets/stream?brand_name={brand}&category_key={cat_key}"
                 storage_prefix = f"{brand.lower()}/{cat_key}/"
             else:
                 img_where.append("subcategory_key = @subk")
                 img_params["subk"] = s["subcategory_key"]
-                stream_url = f"/assets/stream?brand_name={brand}&category_key={cat_key}&subcategory_key={s['subcategory_key']}"
                 storage_prefix = f"{brand.lower()}/{cat_key}/{s['subcategory_key']}/"
 
             imgs_sql = f"""
-            SELECT is_original, original_name, path, url, sequence
+            SELECT original_name, path, url, sequence
             FROM {fq('assets')}
             WHERE {" AND ".join(img_where)}
             ORDER BY sequence, original_name
             """
             imgs = q(imgs_sql, img_params)
+
+            # stream via endpoint protegido que assina on-demand
+            stream_api = [f"/assets/file?path={r['path']}" for r in imgs]
 
             cat_payload["subcategories"].append({
                 "subcategory_key": s["subcategory_key"],
@@ -169,15 +159,12 @@ class AssetsRepository:
                 "columns": s["columns"],
                 "subcategory_text": sub_text_map.get(cat_key, {}).get(s["subcategory_key"] or "", ""),
                 "storage_prefix": storage_prefix,
-                "stream_url": stream_url,
-                "stream": [r["url"] for r in imgs],  # << links de stream na sequência
+                "stream": stream_api,  # <- links já prontos para consumir imagem (assinado via controller)
                 "images": [
                     {
-                        "is_original": r["is_original"],
                         "original_name": r["original_name"],
-                        "path": r["path"],
-                        "url": r["url"],
-                        "sequence": r["sequence"],
+                        "path": r["path"],       # chave interna
+                        "sequence": r["sequence"]
                     } for r in imgs
                 ],
             })

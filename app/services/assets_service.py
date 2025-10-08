@@ -2,7 +2,6 @@
 from typing import Any, Dict, List, Optional
 from ..repositories.assets_repository import AssetsRepository
 
-
 class AssetsService:
     def __init__(self):
         self.repo = AssetsRepository()
