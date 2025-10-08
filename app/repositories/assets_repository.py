@@ -72,43 +72,72 @@ class AssetsRepository:
             params["sseq"] = int(subcategory_seq)
 
         subs_sql = f"""
+        WITH subs AS (
+          SELECT
+            category_key,
+            subcategory_key,
+            ANY_VALUE(category_label)    AS category_label,
+            ANY_VALUE(category_seq)      AS category_seq,
+            ANY_VALUE(subcategory_label) AS subcategory_label,
+            ANY_VALUE(subcategory_seq)   AS subcategory_seq,
+            ANY_VALUE(columns)           AS columns
+          FROM {fq('assets')}
+          WHERE {" AND ".join(base_where)}
+          GROUP BY category_key, subcategory_key
+        )
         SELECT
           category_key,
-          ANY_VALUE(category_label)    AS category_label,
-          ANY_VALUE(category_seq)      AS category_seq,
+          category_label,
+          category_seq,
           subcategory_key,
-          ANY_VALUE(subcategory_label) AS subcategory_label,
-          ANY_VALUE(subcategory_seq)   AS subcategory_seq,
-          ANY_VALUE(columns)           AS columns
-        FROM {fq('assets')}
-        WHERE {" AND ".join(base_where)}
-        GROUP BY category_key, subcategory_key
+          subcategory_label,
+          subcategory_seq,
+          columns
+        FROM subs
         ORDER BY category_seq, category_key, subcategory_seq, subcategory_key
         """
         subs = q(subs_sql, params)
 
+        # textos de categoria (sem subcategoria)
+        cat_txt_where = [w for w in base_where if not w.startswith("subcategory_seq")]
         cat_txt_sql = f"""
+        WITH t AS (
+          SELECT
+            category_key,
+            text_content,
+            sequence
+          FROM {fq('assets')}
+          WHERE {" AND ".join(cat_txt_where)}
+            AND asset_type = 'text'
+            AND (subcategory_key IS NULL OR subcategory_key = '')
+        )
         SELECT
           category_key,
           STRING_AGG(text_content, '\\n\\n' ORDER BY sequence) AS category_text
-        FROM {fq('assets')}
-        WHERE {" AND ".join([w for w in base_where if not w.startswith("subcategory_seq")])}
-          AND asset_type = 'text'
-          AND (subcategory_key IS NULL OR subcategory_key = '')
+        FROM t
         GROUP BY category_key
         """
         cat_txt = q(cat_txt_sql, {k: v for k, v in params.items() if k != "sseq"})
         cat_text_map = {r["category_key"]: (r["category_text"] or "").strip() for r in cat_txt}
 
+        # textos por subcategoria
         sub_txt_sql = f"""
+        WITH t AS (
+          SELECT
+            category_key,
+            subcategory_key,
+            text_content,
+            sequence
+          FROM {fq('assets')}
+          WHERE {" AND ".join(base_where)}
+            AND asset_type = 'text'
+            AND subcategory_key IS NOT NULL
+        )
         SELECT
           category_key,
           subcategory_key,
           STRING_AGG(text_content, '\\n\\n' ORDER BY sequence) AS subcategory_text
-        FROM {fq('assets')}
-        WHERE {" AND ".join(base_where)}
-          AND asset_type = 'text'
-          AND subcategory_key IS NOT NULL
+        FROM t
         GROUP BY category_key, subcategory_key
         """
         sub_txt = q(sub_txt_sql, params)

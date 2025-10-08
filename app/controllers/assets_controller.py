@@ -1,5 +1,5 @@
 # app/controllers/asset_delivery_controller.py
-import io
+import io, re
 import os
 import zipfile
 from flask import Blueprint, request, jsonify, send_file
@@ -21,15 +21,35 @@ def assets_sidebar():
     return jsonify(_service.sidebar(brand))
 
 
+# app/controllers/asset_delivery_controller.py  (apenas a função /assets/gallery)
 @delivery_bp.get("/assets/gallery")
 def assets_gallery():
     brand = (request.args.get("brand_name") or "").strip()
     if not brand:
         return jsonify({"ok": False, "error": "brand_name obrigatório"}), 400
-    category_key: Optional[str] = request.args.get("category_key")
+
+    category_key = (request.args.get("category_key") or "").strip().lower() or None
+
     sseq_raw = request.args.get("subcategory_seq")
-    subcategory_seq: Optional[int] = int(sseq_raw) if (sseq_raw and sseq_raw.isdigit()) else None
-    return jsonify(_service.gallery(brand, category_key, subcategory_seq))
+    subcategory_seq = None
+    if sseq_raw is not None:
+        sseq_raw = sseq_raw.strip()
+        # aceita "01", "1", etc.
+        if re.fullmatch(r"\d+", sseq_raw):
+            subcategory_seq = int(sseq_raw)
+        else:
+            return jsonify({"ok": False, "error": "subcategory_seq inválido"}), 400
+
+    # se pediu subcategoria, categoria é obrigatória (evita 500 por consulta ambígua)
+    if subcategory_seq is not None and not category_key:
+        return jsonify({"ok": False, "error": "category_key é obrigatório quando subcategory_seq é usado"}), 400
+
+    try:
+        return jsonify(_service.gallery(brand, category_key, subcategory_seq))
+    except Exception as e:
+        # erro defensivo (evita HTML 500 do Flask e devolve JSON)
+        return jsonify({"ok": False, "error": f"falha em /assets/gallery: {e}"}), 500
+
 
 
 @delivery_bp.get("/assets/colors")
