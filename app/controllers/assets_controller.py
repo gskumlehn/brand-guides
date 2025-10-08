@@ -1,9 +1,7 @@
 # app/controllers/asset_delivery_controller.py
-import io, re
-import os
-import zipfile
-from flask import Blueprint, request, jsonify, send_file
+import io, re, os, zipfile, mimetypes
 from typing import Optional, List
+from flask import Blueprint, request, jsonify, send_file, abort, Response
 from ..services.assets_service import AssetsService
 from ..infra.bucket.gcs_client import GCSClient
 
@@ -11,7 +9,7 @@ delivery_bp = Blueprint("assets", __name__)
 _service = AssetsService()
 _gcs = GCSClient()
 _BUCKET = os.getenv("GCS_BUCKET", "brand-guides")
-
+SAFE_PATH_RE = re.compile(r"^[a-z0-9/_\-.@ ]+$", re.IGNORECASE)
 
 @delivery_bp.get("/assets/sidebar")
 def assets_sidebar():
@@ -20,56 +18,40 @@ def assets_sidebar():
         return jsonify({"ok": False, "error": "brand_name obrigatório"}), 400
     return jsonify(_service.sidebar(brand))
 
-
-# app/controllers/asset_delivery_controller.py  (apenas a função /assets/gallery)
 @delivery_bp.get("/assets/gallery")
 def assets_gallery():
     brand = (request.args.get("brand_name") or "").strip()
     if not brand:
         return jsonify({"ok": False, "error": "brand_name obrigatório"}), 400
 
-    category_key = (request.args.get("category_key") or "").strip().lower() or None
+    category_key: Optional[str] = (request.args.get("category_key") or "").strip().lower() or None
 
     sseq_raw = request.args.get("subcategory_seq")
-    subcategory_seq = None
+    subcategory_seq: Optional[int] = None
     if sseq_raw is not None:
         sseq_raw = sseq_raw.strip()
-        # aceita "01", "1", etc.
         if re.fullmatch(r"\d+", sseq_raw):
             subcategory_seq = int(sseq_raw)
         else:
             return jsonify({"ok": False, "error": "subcategory_seq inválido"}), 400
 
-    # se pediu subcategoria, categoria é obrigatória (evita 500 por consulta ambígua)
     if subcategory_seq is not None and not category_key:
         return jsonify({"ok": False, "error": "category_key é obrigatório quando subcategory_seq é usado"}), 400
 
     try:
         return jsonify(_service.gallery(brand, category_key, subcategory_seq))
     except Exception as e:
-        # erro defensivo (evita HTML 500 do Flask e devolve JSON)
         return jsonify({"ok": False, "error": f"falha em /assets/gallery: {e}"}), 500
-
-
 
 @delivery_bp.get("/assets/colors")
 def assets_colors():
-    """
-    Tabela de cores por marca, com textos (principal/secundaria) e grupos.
-    GET /assets/colors?brand_name=CCBA
-    """
     brand = (request.args.get("brand_name") or "").strip()
     if not brand:
         return jsonify({"ok": False, "error": "brand_name obrigatório"}), 400
     return jsonify(_service.colors(brand))
 
-
 @delivery_bp.get("/assets/originais.zip")
 def download_originais_zip():
-    """
-    Download do pacote 'originais' de uma categoria.
-    GET /assets/originais.zip?brand_name=CCBA&category_key=logo
-    """
     brand = (request.args.get("brand_name") or "").strip()
     category_key = (request.args.get("category_key") or "").strip().lower()
     if not brand or not category_key:
@@ -91,3 +73,31 @@ def download_originais_zip():
     mem.seek(0)
     fname = f"{brand.lower()}-{category_key}-originais.zip"
     return send_file(mem, mimetype="application/zip", as_attachment=True, download_name=fname)
+
+@delivery_bp.get("/assets/stream")
+def assets_stream():
+    brand = (request.args.get("brand_name") or "").strip()
+    path = (request.args.get("path") or "").strip()
+    if not brand or not path:
+        return jsonify({"ok": False, "error": "brand_name e path são obrigatórios"}), 400
+
+    # segurança básica do caminho e escopo da marca
+    if ".." in path or not path.lower().startswith(brand.lower() + "/") or not SAFE_PATH_RE.match(path):
+        return abort(403)
+
+    try:
+        data = _gcs.read_bytes(_BUCKET, path)
+    except Exception:
+        return abort(404)
+
+    ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    resp: Response = send_file(
+        io.BytesIO(data),
+        mimetype=ctype,
+        as_attachment=False,
+        download_name=os.path.basename(path),
+        max_age=60,
+        conditional=True,
+    )
+    resp.headers["Cache-Control"] = "private, max-age=60"
+    return resp
