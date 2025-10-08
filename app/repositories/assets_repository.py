@@ -1,9 +1,11 @@
 # app/repositories/assets_repository.py
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from collections import defaultdict
 from ..infra.db.bq_client import q, fq
 
 
 class AssetsRepository:
+    # -------- Sidebar --------
     def sidebar(self, brand: str) -> List[Dict[str, Any]]:
         cats_sql = f"""
         SELECT
@@ -53,6 +55,7 @@ class AssetsRepository:
             })
         return out
 
+    # -------- Gallery --------
     def gallery(
         self,
         brand: str,
@@ -154,13 +157,12 @@ class AssetsRepository:
                 "columns": s["columns"],
                 "subcategory_text": sub_text_map.get(cat_key, {}).get(s["subcategory_key"] or "", ""),
                 "storage_prefix": storage_prefix,
-                # 'stream' será preenchido no service com URLs assinadas
                 "images": [
                     {
                         "is_original": r["is_original"],
                         "original_name": r["original_name"],
                         "path": r["path"],
-                        "url": r["url"],           # URL pública (ignorar se bucket é privado)
+                        "url": r["url"],
                         "sequence": r["sequence"],
                     } for r in imgs
                 ],
@@ -177,3 +179,104 @@ class AssetsRepository:
             out.append(payload)
         out.sort(key=lambda c: (c["category_seq"], c["category_key"]))
         return out
+
+    # -------- Colors (tabela) --------
+    def colors(self, brand: str) -> Dict[str, Any]:
+        """
+        Retorna tabela de cores com agrupamento por (category, subcategory) e textos de 'cores'.
+        Estrutura:
+        {
+          "brand_name": "...",
+          "texts": {"principal": "...", "secundaria": "..."},
+          "groups": [
+            {
+              "category": "main"|"secondary"|null|"...",
+              "subcategory": "primary"|"secondary"|null|"...",
+              "items": [
+                {"label","key","hex","rgb","cmyk","pantone","sequence"}
+              ]
+            }, ...
+          ]
+        }
+        """
+        colors_sql = f"""
+        SELECT
+          color_label,
+          color_key,
+          hex,
+          rgb_txt,
+          cmyk_txt,
+          pantone_txt,
+          category,
+          subcategory,
+          sequence
+        FROM {fq('colors')}
+        WHERE brand_name = @brand
+        ORDER BY
+          CASE
+            WHEN LOWER(IFNULL(category,'')) = 'main' THEN 0
+            WHEN LOWER(IFNULL(category,'')) = 'secondary' THEN 1
+            WHEN IFNULL(category,'') = '' THEN 2
+            ELSE 3
+          END,
+          IFNULL(subcategory, ''),
+          sequence,
+          color_label
+        """
+        rows = q(colors_sql, {"brand": brand})
+
+        # texts da categoria 'cores' vindos do assets (principal/secundaria)
+        txt_sql = f"""
+        SELECT
+          subcategory_key,
+          STRING_AGG(text_content, '\\n\\n' ORDER BY sequence) AS txt
+        FROM {fq('assets')}
+        WHERE brand_name = @brand
+          AND category_key = 'cores'
+          AND asset_type = 'text'
+          AND subcategory_key IS NOT NULL
+        GROUP BY subcategory_key
+        """
+        texts = {r["subcategory_key"]: (r["txt"] or "").strip() for r in q(txt_sql, {"brand": brand})}
+
+        groups_map: Dict[Tuple[Optional[str], Optional[str]], List[Dict[str, Any]]] = defaultdict(list)
+        for r in rows:
+            groups_map[(r["category"], r["subcategory"])].append({
+                "label": r["color_label"],
+                "key": r["color_key"],
+                "hex": r["hex"],
+                "rgb": r["rgb_txt"],
+                "cmyk": r["cmyk_txt"],
+                "pantone": r["pantone_txt"],
+                "sequence": r["sequence"],
+            })
+
+        groups: List[Dict[str, Any]] = []
+        for (cat, sub), items in groups_map.items():
+            groups.append({
+                "category": cat,
+                "subcategory": sub,
+                "items": items
+            })
+
+        # ordena grupos por regra semelhante ao ORDER BY de cima
+        def cat_rank(v: Optional[str]) -> int:
+            if v is None or v == "":
+                return 2
+            v2 = v.lower()
+            if v2 == "main":
+                return 0
+            if v2 == "secondary":
+                return 1
+            return 3
+
+        groups.sort(key=lambda g: (cat_rank(g["category"]), g["subcategory"] or ""))
+
+        return {
+            "brand_name": brand,
+            "texts": {
+                "principal": texts.get("principal", ""),
+                "secundaria": texts.get("secundaria", "")
+            },
+            "groups": groups
+        }

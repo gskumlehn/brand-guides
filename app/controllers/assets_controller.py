@@ -32,11 +32,23 @@ def assets_gallery():
     return jsonify(_service.gallery(brand, category_key, subcategory_seq))
 
 
+@delivery_bp.get("/assets/colors")
+def assets_colors():
+    """
+    Tabela de cores por marca, com textos (principal/secundaria) e grupos.
+    GET /assets/colors?brand_name=CCBA
+    """
+    brand = (request.args.get("brand_name") or "").strip()
+    if not brand:
+        return jsonify({"ok": False, "error": "brand_name obrigatório"}), 400
+    return jsonify(_service.colors(brand))
+
+
 @delivery_bp.get("/assets/originais.zip")
 def download_originais_zip():
     """
-    Gera um .zip com os arquivos de 'originais' de uma categoria:
-      GET /assets/originais.zip?brand_name=CCBA&category_key=logo
+    Download do pacote 'originais' de uma categoria.
+    GET /assets/originais.zip?brand_name=CCBA&category_key=logo
     """
     brand = (request.args.get("brand_name") or "").strip()
     category_key = (request.args.get("category_key") or "").strip().lower()
@@ -46,27 +58,16 @@ def download_originais_zip():
     prefix = f"{brand.lower()}/{category_key}/originais/"
     paths: List[str] = _gcs.list_paths(_BUCKET, prefix)
 
-    if not paths:
-        # Sem originais — retorna zip vazio mesmo assim
-        paths = []
-
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         for p in paths:
             try:
                 data = _gcs.read_bytes(_BUCKET, p)
-                # nome do arquivo dentro do zip sem o prefixo
                 arcname = p[len(prefix):] if p.startswith(prefix) else os.path.basename(p)
                 z.writestr(arcname, data)
-            except Exception as e:
-                # ignora arquivos com erro de leitura
+            except Exception:
                 continue
 
     mem.seek(0)
     fname = f"{brand.lower()}-{category_key}-originais.zip"
-    return send_file(
-        mem,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name=fname
-    )
+    return send_file(mem, mimetype="application/zip", as_attachment=True, download_name=fname)
