@@ -1,9 +1,11 @@
 # app/controllers/asset_delivery_controller.py
-from flask import Blueprint, request, jsonify, redirect
-from typing import Optional
+import io
+import os
+import zipfile
+from flask import Blueprint, request, jsonify, send_file
+from typing import Optional, List
 from ..services.assets_service import AssetsService
 from ..infra.bucket.gcs_client import GCSClient
-import os
 
 delivery_bp = Blueprint("assets", __name__)
 _service = AssetsService()
@@ -18,6 +20,7 @@ def assets_sidebar():
         return jsonify({"ok": False, "error": "brand_name obrigatório"}), 400
     return jsonify(_service.sidebar(brand))
 
+
 @delivery_bp.get("/assets/gallery")
 def assets_gallery():
     brand = (request.args.get("brand_name") or "").strip()
@@ -28,21 +31,42 @@ def assets_gallery():
     subcategory_seq: Optional[int] = int(sseq_raw) if (sseq_raw and sseq_raw.isdigit()) else None
     return jsonify(_service.gallery(brand, category_key, subcategory_seq))
 
-@delivery_bp.get("/assets/file")
-def assets_file():
-    """
-    Redireciona (302) para uma URL assinada do objeto GCS.
-    Requer: ?path=<path no bucket>  (ex.: ccba/logo/01-principal-01/01.png)
-    Opcional: &download=1 (força attachment)
-    """
-    path = (request.args.get("path") or "").strip()
-    if not path or "/" not in path:
-        return jsonify({"ok": False, "error": "path inválido"}), 400
 
-    # (Opcional) checagem simples de sanitização: sem caminhos ascendentes
-    if ".." in path or path.startswith("/"):
-        return jsonify({"ok": False, "error": "path inválido"}), 400
+@delivery_bp.get("/assets/originais.zip")
+def download_originais_zip():
+    """
+    Gera um .zip com os arquivos de 'originais' de uma categoria:
+      GET /assets/originais.zip?brand_name=CCBA&category_key=logo
+    """
+    brand = (request.args.get("brand_name") or "").strip()
+    category_key = (request.args.get("category_key") or "").strip().lower()
+    if not brand or not category_key:
+        return jsonify({"ok": False, "error": "brand_name e category_key são obrigatórios"}), 400
 
-    as_attachment = (request.args.get("download") == "1")
-    url = _gcs.signed_url(_BUCKET, path, minutes=15, as_attachment=as_attachment)
-    return redirect(url, code=302)
+    prefix = f"{brand.lower()}/{category_key}/originais/"
+    paths: List[str] = _gcs.list_paths(_BUCKET, prefix)
+
+    if not paths:
+        # Sem originais — retorna zip vazio mesmo assim
+        paths = []
+
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        for p in paths:
+            try:
+                data = _gcs.read_bytes(_BUCKET, p)
+                # nome do arquivo dentro do zip sem o prefixo
+                arcname = p[len(prefix):] if p.startswith(prefix) else os.path.basename(p)
+                z.writestr(arcname, data)
+            except Exception as e:
+                # ignora arquivos com erro de leitura
+                continue
+
+    mem.seek(0)
+    fname = f"{brand.lower()}-{category_key}-originais.zip"
+    return send_file(
+        mem,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=fname
+    )

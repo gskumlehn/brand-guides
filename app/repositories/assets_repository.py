@@ -4,7 +4,6 @@ from ..infra.db.bq_client import q, fq
 
 
 class AssetsRepository:
-    # -------- Sidebar --------
     def sidebar(self, brand: str) -> List[Dict[str, Any]]:
         cats_sql = f"""
         SELECT
@@ -54,7 +53,6 @@ class AssetsRepository:
             })
         return out
 
-    # -------- Gallery --------
     def gallery(
         self,
         brand: str,
@@ -142,15 +140,12 @@ class AssetsRepository:
                 storage_prefix = f"{brand.lower()}/{cat_key}/{s['subcategory_key']}/"
 
             imgs_sql = f"""
-            SELECT original_name, path, url, sequence
+            SELECT is_original, original_name, path, url, sequence
             FROM {fq('assets')}
             WHERE {" AND ".join(img_where)}
             ORDER BY sequence, original_name
             """
             imgs = q(imgs_sql, img_params)
-
-            # stream via endpoint protegido que assina on-demand
-            stream_api = [f"/assets/file?path={r['path']}" for r in imgs]
 
             cat_payload["subcategories"].append({
                 "subcategory_key": s["subcategory_key"],
@@ -159,12 +154,14 @@ class AssetsRepository:
                 "columns": s["columns"],
                 "subcategory_text": sub_text_map.get(cat_key, {}).get(s["subcategory_key"] or "", ""),
                 "storage_prefix": storage_prefix,
-                "stream": stream_api,  # <- links já prontos para consumir imagem (assinado via controller)
+                # 'stream' será preenchido no service com URLs assinadas
                 "images": [
                     {
+                        "is_original": r["is_original"],
                         "original_name": r["original_name"],
-                        "path": r["path"],       # chave interna
-                        "sequence": r["sequence"]
+                        "path": r["path"],
+                        "url": r["url"],           # URL pública (ignorar se bucket é privado)
+                        "sequence": r["sequence"],
                     } for r in imgs
                 ],
             })
