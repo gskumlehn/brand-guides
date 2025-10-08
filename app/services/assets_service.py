@@ -48,3 +48,20 @@ class AssetsService:
 
     def colors(self, brand: str) -> Dict[str, Any]:
         return self.repo.colors(brand)
+
+    def has_originais(self, brand: str, category_key: str) -> Dict[str, Any]:
+        if not brand or not category_key:
+            return {"ok": False, "error": "brand e category_key são obrigatórios"}
+        prefix = f"{brand.lower()}/{category_key.lower()}/originais/"
+        try:
+            paths = self.gcs.list_paths(_BUCKET, prefix)
+            cnt = len(paths)
+            return {
+                "ok": True,
+                "brand_name": brand,
+                "category_key": category_key,
+                "has_originais": cnt > 0,
+                "count": cnt,
+            }
+        except Exception as e:
+            return {"ok": False, "error": f"falha ao verificar originais: {e}"}

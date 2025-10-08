@@ -101,3 +101,12 @@ def assets_stream():
     )
     resp.headers["Cache-Control"] = "private, max-age=60"
     return resp
+
+@delivery_bp.get("/assets/originais/exists")
+def exists_originais():
+    brand = (request.args.get("brand_name") or "").strip()
+    category_key = (request.args.get("category_key") or "").strip().lower()
+    if not brand or not category_key:
+        return jsonify({"ok": False, "error": "brand_name e category_key são obrigatórios"}), 400
+    res = _service.has_originais(brand, category_key)
+    return jsonify(res), (200 if res.get("ok") else 500)
