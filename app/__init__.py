@@ -31,10 +31,10 @@ def create_app():
 
     from .controllers.ui_controller import ui_bp
     from .controllers.ingestion_controller import ingestion_bp
-    from .controllers.assets_controller import assets_bp
+    from .controllers.assets_controller import delivery_bp
 
     app.register_blueprint(ui_bp)
     app.register_blueprint(ingestion_bp, url_prefix="/ingest")
-    app.register_blueprint(assets_bp)
+    app.register_blueprint(delivery_bp)
 
     return app
